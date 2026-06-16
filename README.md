@@ -1,22 +1,50 @@
 # RL Indoor Drone Navigation Demo
 
-Autonomous indoor drone navigation using **Reinforcement Learning**, with a 3D web-based simulation UI.
+Autonomous indoor drone navigation using **Reinforcement Learning**, with a 3D Three.js web simulation UI.
 
 ![Demo UI](assets/demo-preview.png)
+
+## Project Structure
+
+```
+DRONE/
+├── env/                    # Gymnasium RL environment
+│   └── indoor_drone_env.py
+├── agent/                  # A* path planning + playback (not the RL agent)
+│   └── navigator.py
+├── server/                 # FastAPI + WebSocket
+│   └── app.py
+├── web/                    # Three.js 3D UI
+│   ├── index.html
+│   └── static/
+│       ├── css/style.css
+│       └── js/
+│           ├── main.js     # UI controls & WebSocket
+│           └── scene.js    # Three.js 3D scene
+├── train.py                # PPO training script
+├── run_demo.py             # Start demo server
+├── requirements.txt
+├── README.md
+└── assets/                 # Screenshots & media
+```
+
+| Folder / file | Role |
+|---------------|------|
+| `env/` | Gymnasium environment: map, lidar, rewards, drone physics |
+| `agent/` | A* planner, path safety checks, scripted demo playback |
+| `server/` | REST API, WebSocket simulation loop, model loading |
+| `web/` | Browser UI: point picking, HUD, Three.js visualization |
+| `train.py` | Train PPO agent; saves to `models/` (created on first run) |
+| `run_demo.py` | Entry point — starts server at `http://localhost:8000` |
 
 ## Features
 
 - **Custom Gymnasium Environment** — Indoor building with walls, corridors, and crate obstacles
 - **Lidar-based Observations** — 16-ray distance sensors + goal direction + velocity
 - **PPO Agent** — Trained with Stable-Baselines3 (Proximal Policy Optimization)
-- **3D Web Visualization** — Three.js scene matching the reference UI:
-  - Gray concrete walls and corridors
-  - Brown crate obstacles
-  - Blue start marker, green goal marker
-  - Dotted flight path trail
-  - Animated quadcopter drone
-  - Real-time lidar sensor display
-- **Heuristic Fallback** — Demo works immediately without training
+- **3D Web Visualization (Three.js)** — Gray floor/walls, brown crates, animated quadcopter
+- **Click-to-set Start/Goal** — Collision-free A* path planning
+- **Heuristic Fallback** — Demo runs immediately without a trained model
 
 ## Quick Start
 
@@ -40,32 +68,10 @@ Open **http://localhost:8000** in your browser.
 ### 3. Train the RL Agent (Optional)
 
 ```bash
-# Full training (100k steps, ~5-10 min)
 python train.py
 ```
 
-After training, the model is saved to `models/ppo_indoor_drone.zip` and loaded automatically.
-
-## Project Structure
-
-```
-DRONE/
-├── env/
-│   └── indoor_drone_env.py   # Gymnasium RL environment
-├── server/
-│   └── app.py                # FastAPI + WebSocket server
-├── web/
-│   ├── index.html            # Demo UI
-│   └── static/
-│       ├── css/style.css
-│       └── js/
-│           ├── main.js       # UI controls & WebSocket
-│           └── scene.js      # Three.js 3D scene
-├── train.py                  # PPO training script
-├── run_demo.py               # Start demo server
-├── requirements.txt
-└── models/                   # Saved RL models
-```
+After training, the model is saved to `models/ppo_indoor_drone.zip` and loaded automatically by the server.
 
 ## RL Environment Details
 
@@ -80,8 +86,9 @@ DRONE/
 
 | Button | Action |
 |--------|--------|
-| **Start Demo** | Run navigation from start to goal |
-| **Reset** | Reset drone to start position |
+| **Set Start / Set Goal** | Click open floor tiles to place markers |
+| **Start Demo** | Run navigation along the planned path |
+| **Reset** | Reset environment to default |
 
 ## Tech Stack
 

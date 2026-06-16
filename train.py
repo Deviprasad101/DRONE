@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
 from stable_baselines3 import PPO
@@ -12,7 +11,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from env.indoor_drone_env import IndoorDroneEnv
 
-MODELS_DIR = Path(__file__).parent.parent / "models"
+MODELS_DIR = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 DEFAULT_MODEL_PATH = MODELS_DIR / "ppo_indoor_drone"
 
