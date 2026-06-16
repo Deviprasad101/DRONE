@@ -40,8 +40,58 @@ export class DroneScene {
     this.goalMarker = null;
     this.mapGroup = new THREE.Group();
     this.scene.add(this.mapGroup);
+    this.floorMesh = null;
+    this.pickMode = null;
+    this.onPick = null;
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
+    this._pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this._pickTarget = new THREE.Vector3();
 
     window.addEventListener("resize", () => this._onResize());
+  }
+
+  setPickMode(mode, callback) {
+    this.pickMode = mode;
+    this.onPick = callback;
+    this.controls.enabled = !mode;
+  }
+
+  pickAtScreen(clientX, clientY) {
+    if (!this.pickMode || !this.onPick) return false;
+
+    const rect = this.canvas.getBoundingClientRect();
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      return false;
+    }
+
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+
+    if (this.floorMesh) {
+      const hits = this.raycaster.intersectObject(this.floorMesh);
+      if (hits.length > 0) {
+        const p = hits[0].point;
+        this.onPick(this.pickMode, p.x, p.z);
+        return true;
+      }
+    }
+
+    if (this.raycaster.ray.intersectPlane(this._pickPlane, this._pickTarget)) {
+      const x = this._pickTarget.x;
+      const z = this._pickTarget.z;
+      if (x >= 0 && x <= 19 && z >= 0 && z <= 19) {
+        this.onPick(this.pickMode, x, z);
+        return true;
+      }
+    }
+    return false;
   }
 
   _setupLights() {
@@ -96,6 +146,7 @@ export class DroneScene {
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(mapLayout[0].length / 2 - 0.5, 0, mapLayout.length / 2 - 0.5);
     floor.receiveShadow = true;
+    this.floorMesh = floor;
     this.mapGroup.add(floor);
 
     const wallMat = new THREE.MeshStandardMaterial({

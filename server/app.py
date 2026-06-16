@@ -11,9 +11,10 @@ import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from env.indoor_drone_env import IndoorDroneEnv
-from agent.navigator import PathFollower
+from agent.navigator import PathFollower, path_exists, snap_to_walkable
 
 WEB_DIR = Path(__file__).parent.parent / "web"
 MODELS_DIR = Path(__file__).parent.parent / "models"
@@ -66,9 +67,70 @@ async def index():
     return FileResponse(WEB_DIR / "index.html")
 
 
+def build_state() -> dict:
+    state = env.get_state_dict()
+    state["planned_path"] = path_follower.planned_path
+    state["path_valid"] = path_exists(
+        env.map_layout,
+        tuple(env.start_pos.tolist()),
+        tuple(env.goal_pos.tolist()),
+    )
+    return state
+
+
+def apply_point(point_type: str, x: float, y: float) -> dict:
+    snapped = snap_to_walkable(env.map_layout, x, y)
+    if snapped is None:
+        return {"ok": False, "error": "No walkable area near click. Click on open floor."}
+
+    start = tuple(env.start_pos.tolist())
+    goal = tuple(env.goal_pos.tolist())
+
+    if point_type == "start":
+        start = snapped
+    elif point_type == "goal":
+        goal = snapped
+    else:
+        return {"ok": False, "error": "Invalid point type"}
+
+    if start == goal:
+        return {"ok": False, "error": "Start and goal must be different points."}
+
+    env.set_mission(start, goal)
+    env.reset()
+    path_follower.reset(start, goal)
+    has_path = path_exists(env.map_layout, start, goal)
+
+    return {
+        "ok": True,
+        "state": build_state(),
+        "point_type": point_type,
+        "position": list(snapped),
+        "path_valid": has_path,
+        "warning": None
+        if has_path
+        else "Point set, but no path to the other marker yet. Adjust the other point.",
+    }
+
+
+class SetPointRequest(BaseModel):
+    point_type: str
+    x: float
+    y: float
+
+
+@app.post("/api/set-point")
+async def set_point(req: SetPointRequest):
+    if simulation_running:
+        return {"ok": False, "error": "Cannot change points while simulation is running."}
+    if req.point_type not in ("start", "goal"):
+        return {"ok": False, "error": "point_type must be 'start' or 'goal'"}
+    return apply_point(req.point_type, req.x, req.y)
+
+
 @app.get("/api/state")
 async def get_state():
-    return env.get_state_dict()
+    return build_state()
 
 
 @app.get("/api/model-status")
@@ -82,6 +144,21 @@ async def model_status():
 
 async def run_episode(ws: WebSocket):
     global simulation_running
+
+    if not path_exists(
+        env.map_layout,
+        tuple(env.start_pos.tolist()),
+        tuple(env.goal_pos.tolist()),
+    ):
+        await ws.send_json(
+            {
+                "type": "error",
+                "message": "No valid path. Set start and goal on walkable floor tiles.",
+            }
+        )
+        simulation_running = False
+        return
+
     obs, info = env.reset()
     path_follower.reset(
         tuple(env.start_pos.tolist()),
@@ -90,8 +167,7 @@ async def run_episode(ws: WebSocket):
     total_reward = 0.0
     use_scripted = model is None
 
-    state = env.get_state_dict()
-    state["planned_path"] = path_follower.planned_path
+    state = build_state()
     await ws.send_json({"type": "state", "state": state, "reward": 0})
     await asyncio.sleep(0.3)
 
@@ -126,8 +202,7 @@ async def run_episode(ws: WebSocket):
             reason = "Goal reached!" if success else ""
 
         total_reward += reward
-        state = env.get_state_dict()
-        state["planned_path"] = path_follower.planned_path
+        state = build_state()
         await ws.send_json(
             {"type": "state", "state": state, "reward": float(reward)}
         )
@@ -217,9 +292,29 @@ async def websocket_simulation(ws: WebSocket):
                     tuple(env.start_pos.tolist()),
                     tuple(env.goal_pos.tolist()),
                 )
-                state = env.get_state_dict()
-                state["planned_path"] = path_follower.planned_path
-                await ws.send_json({"type": "reset", "state": state})
+                await ws.send_json({"type": "reset", "state": build_state()})
+
+            elif action in ("set_start", "set_goal"):
+                if simulation_running:
+                    await ws.send_json(
+                        {"type": "error", "message": "Cannot change points while running."}
+                    )
+                    continue
+                x = float(msg.get("x", 0))
+                y = float(msg.get("y", 0))
+                point_type = "start" if action == "set_start" else "goal"
+                result = apply_point(point_type, x, y)
+                if result["ok"]:
+                    await ws.send_json(
+                        {
+                            "type": "points_updated",
+                            "point_type": point_type,
+                            "position": result["position"],
+                            "state": result["state"],
+                        }
+                    )
+                else:
+                    await ws.send_json({"type": "error", "message": result["error"]})
 
             elif action == "train":
                 timesteps = msg.get("timesteps", 20000)

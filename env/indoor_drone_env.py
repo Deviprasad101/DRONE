@@ -90,7 +90,17 @@ class IndoorDroneEnv(gym.Env):
         self._prev_dist_to_goal = 0.0
 
     def _world_to_grid(self, x: float, y: float) -> tuple[int, int]:
-        return int(y), int(x)
+        return int(round(y)), int(round(x))
+
+    def is_walkable(self, x: float, y: float) -> bool:
+        row, col = self._world_to_grid(x, y)
+        if row < 0 or col < 0 or row >= self.grid_h or col >= self.grid_w:
+            return False
+        return int(self.map_layout[row, col]) == 0
+
+    def set_mission(self, start: tuple[float, float], goal: tuple[float, float]) -> None:
+        self.start_pos = np.array(start, dtype=np.float32)
+        self.goal_pos = np.array(goal, dtype=np.float32)
 
     def _is_collision(self, x: float, y: float) -> bool:
         for gi in range(self.grid_h):

@@ -66,6 +66,45 @@ def grid_to_world(row: int, col: int) -> WorldPos:
     return float(col), float(row)
 
 
+def is_walkable(grid: np.ndarray, x: float, y: float) -> bool:
+    row, col = world_to_grid(x, y)
+    if row < 0 or col < 0 or row >= grid.shape[0] or col >= grid.shape[1]:
+        return False
+    return int(grid[row, col]) == 0
+
+
+def snap_to_walkable(grid: np.ndarray, x: float, y: float) -> WorldPos | None:
+    """Snap click position to nearest walkable cell center."""
+    row, col = world_to_grid(x, y)
+    h, w = grid.shape
+    if 0 <= row < h and 0 <= col < w and grid[row, col] == 0:
+        return grid_to_world(row, col)
+
+    best: WorldPos | None = None
+    best_dist = float("inf")
+    for radius in range(1, 6):
+        for dr in range(-radius, radius + 1):
+            for dc in range(-radius, radius + 1):
+                nr, nc = row + dr, col + dc
+                if nr < 0 or nc < 0 or nr >= h or nc >= w:
+                    continue
+                if grid[nr, nc] != 0:
+                    continue
+                dist = dr * dr + dc * dc
+                if dist < best_dist:
+                    best_dist = dist
+                    best = grid_to_world(nr, nc)
+        if best is not None:
+            return best
+    return None
+
+
+def path_exists(grid: np.ndarray, start: WorldPos, goal: WorldPos) -> bool:
+    start_cell = world_to_grid(start[0], start[1])
+    goal_cell = world_to_grid(goal[0], goal[1])
+    return bool(astar(grid, start_cell, goal_cell))
+
+
 def plan_world_path(
     grid: np.ndarray, start: WorldPos, goal: WorldPos
 ) -> List[WorldPos]:
@@ -73,7 +112,7 @@ def plan_world_path(
     goal_cell = world_to_grid(goal[0], goal[1])
     cells = astar(grid, start_cell, goal_cell)
     if not cells:
-        return [goal]
+        return []
     return [grid_to_world(r, c) for r, c in cells]
 
 

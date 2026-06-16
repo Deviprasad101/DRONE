@@ -22,8 +22,13 @@
 
     <main class="main">
       <div class="simulation-panel">
-        <div class="panel-badge">3D ANIMATION (SIMULATION)</div>
-        <canvas id="canvas3d"></canvas>
+        <div class="canvas-wrap" id="canvas-wrap">
+          <div class="panel-badge">3D ANIMATION (SIMULATION)</div>
+          <canvas id="canvas3d"></canvas>
+          <div id="pick-overlay" class="pick-overlay hidden" aria-hidden="true">
+            <span id="pick-overlay-text">Click the floor to place point</span>
+          </div>
+        </div>
         <div class="hud">
           <div class="hud-item">
             <span class="label">Steps</span>
@@ -45,6 +50,22 @@
       </div>
 
       <aside class="sidebar">
+        <section class="card">
+          <h2>Select Route</h2>
+          <p class="info-text">
+            Click a button below, then click on the <strong>open floor</strong> in the 3D map.
+            The drone will plan a collision-free path around walls and crates.
+          </p>
+          <div class="point-controls">
+            <button id="btn-pick-start" class="btn pick start-pick">Set Start (Blue)</button>
+            <button id="btn-pick-goal" class="btn pick goal-pick">Set Goal (Green)</button>
+          </div>
+          <div class="point-readout">
+            <div><span class="label">Start</span> <span id="readout-start">2, 2</span></div>
+            <div><span class="label">Goal</span> <span id="readout-goal">17, 17</span></div>
+          </div>
+          <p id="pick-hint" class="pick-hint">Select start and goal, then press Start Demo.</p>
+        </section>
         <section class="card">
           <h2>Legend</h2>
           <ul class="legend">

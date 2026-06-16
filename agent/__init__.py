@@ -1,3 +1,3 @@
-from .navigator import PathFollower, plan_world_path
+from .navigator import PathFollower, path_exists, plan_world_path, snap_to_walkable
 
-__all__ = ["PathFollower", "plan_world_path"]
+__all__ = ["PathFollower", "path_exists", "plan_world_path", "snap_to_walkable"]
