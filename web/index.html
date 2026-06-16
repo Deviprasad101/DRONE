@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RL Based Indoor Drone Navigation</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="title-block">
+        <h1><span class="accent">RL BASED</span> INDOOR DRONE NAVIGATION</h1>
+        <p class="subtitle">Autonomous Navigation Inside Buildings using Reinforcement Learning</p>
+      </div>
+      <div class="controls">
+        <button id="btn-start" class="btn primary">Start Demo</button>
+        <button id="btn-train" class="btn secondary">Quick Train</button>
+        <button id="btn-reset" class="btn">Reset</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="simulation-panel">
+        <div class="panel-badge">3D ANIMATION (SIMULATION)</div>
+        <canvas id="canvas3d"></canvas>
+        <div class="hud">
+          <div class="hud-item">
+            <span class="label">Steps</span>
+            <span id="hud-steps" class="value">0</span>
+          </div>
+          <div class="hud-item">
+            <span class="label">Distance to Goal</span>
+            <span id="hud-dist" class="value">--</span>
+          </div>
+          <div class="hud-item">
+            <span class="label">Status</span>
+            <span id="hud-status" class="value idle">Idle</span>
+          </div>
+          <div class="hud-item">
+            <span class="label">Reward</span>
+            <span id="hud-reward" class="value">0</span>
+          </div>
+        </div>
+      </div>
+
+      <aside class="sidebar">
+        <section class="card">
+          <h2>Legend</h2>
+          <ul class="legend">
+            <li><span class="dot start"></span> Start Position</li>
+            <li><span class="dot goal"></span> Goal Position</li>
+            <li><span class="dot path"></span> Flight Path</li>
+            <li><span class="dot drone"></span> RL Agent (Drone)</li>
+          </ul>
+        </section>
+        <section class="card">
+          <h2>RL Agent Info</h2>
+          <p class="info-text">
+            The drone uses <strong>PPO (Proximal Policy Optimization)</strong> trained with
+            lidar-like distance sensors to navigate from the blue start marker to the green goal
+            while avoiding walls and crate obstacles.
+          </p>
+          <div class="sensor-viz">
+            <canvas id="lidar-canvas" width="160" height="160"></canvas>
+            <span class="sensor-label">Lidar Sensors (16 rays)</span>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Training Log</h2>
+          <div id="log" class="log"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

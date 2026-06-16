@@ -1,0 +1,261 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0f1419;
+  --panel: #1a2332;
+  --border: #2a3a4f;
+  --accent: #3b82f6;
+  --accent-dark: #1d4ed8;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+}
+
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.title-block h1 {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.title-block .accent {
+  color: var(--accent);
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-top: 6px;
+}
+
+.controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  background: #243044;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  color: white;
+}
+
+.btn.primary:hover {
+  background: var(--accent-dark);
+}
+
+.btn.secondary {
+  background: #1e3a2f;
+  border-color: #22c55e55;
+  color: #86efac;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 20px;
+}
+
+@media (max-width: 1000px) {
+  .main {
+    grid-template-columns: 1fr;
+  }
+}
+
+.simulation-panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 520px;
+}
+
+.panel-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+
+#canvas3d {
+  display: block;
+  width: 100%;
+  height: 520px;
+}
+
+.hud {
+  display: flex;
+  gap: 24px;
+  padding: 14px 20px;
+  background: rgba(0, 0, 0, 0.4);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hud-item .label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.hud-item .value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-item .value.idle { color: var(--muted); }
+.hud-item .value.running { color: var(--accent); }
+.hud-item .value.success { color: var(--success); }
+.hud-item .value.failed { color: var(--danger); }
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.card h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.legend {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.start { background: #3b82f6; box-shadow: 0 0 8px #3b82f6; }
+.dot.goal { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+.dot.path { background: #60a5fa; border-radius: 2px; width: 20px; height: 3px; }
+.dot.drone { background: #1e293b; border: 2px solid #64748b; }
+
+.info-text {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.sensor-viz {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+#lidar-canvas {
+  background: #0a0f14;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+.sensor-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.log {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.75rem;
+  max-height: 180px;
+  overflow-y: auto;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.log .entry { margin-bottom: 4px; }
+.log .entry.info { color: var(--accent); }
+.log .entry.success { color: var(--success); }
+.log .entry.error { color: var(--danger); }

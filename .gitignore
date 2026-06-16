@@ -1,0 +1,8 @@
+models/
+*.zip
+__pycache__/
+*.pyc
+venv/
+.env
+tensorboard/
+logs/
