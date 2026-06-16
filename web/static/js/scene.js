@@ -3,6 +3,12 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const WALL_HEIGHT = 2.5;
 const CRATE_HEIGHT = 0.8;
+const FLIGHT_PATH_Y = 1.15;
+const PLANNED_PATH_Y = 0.08;
+
+function pathToVectors(points, y) {
+  return points.map((p) => new THREE.Vector3(p[0], y, p[1]));
+}
 
 export class DroneScene {
   constructor(canvas) {
@@ -339,18 +345,16 @@ export class DroneScene {
         this.pathLine.material.dispose();
       }
 
-      const points = state.path.map((p) => new THREE.Vector3(p[0], 1.0, p[1]));
+      const points = pathToVectors(state.path, FLIGHT_PATH_Y);
       const geometry = new THREE.BufferGeometry().setFromPoints(points);
 
       this.pathLine = new THREE.Line(
         geometry,
-        new THREE.LineDashedMaterial({
+        new THREE.LineBasicMaterial({
           color: 0x60a5fa,
-          dashSize: 0.3,
-          gapSize: 0.15,
+          linewidth: 2,
         })
       );
-      this.pathLine.computeLineDistances();
       this.scene.add(this.pathLine);
     }
 
@@ -361,16 +365,15 @@ export class DroneScene {
         this.plannedLine.material.dispose();
       }
 
-      const planned = state.planned_path.map(
-        (p) => new THREE.Vector3(p[0], 0.05, p[1])
-      );
+      const planned = pathToVectors(state.planned_path, PLANNED_PATH_Y);
       const geometry = new THREE.BufferGeometry().setFromPoints(planned);
       this.plannedLine = new THREE.Line(
         geometry,
         new THREE.LineBasicMaterial({
           color: 0x22c55e,
           transparent: true,
-          opacity: 0.35,
+          opacity: 0.55,
+          linewidth: 2,
         })
       );
       this.scene.add(this.plannedLine);

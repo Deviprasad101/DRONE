@@ -69,6 +69,8 @@ async def index():
 def build_state() -> dict:
     state = env.get_state_dict()
     state["planned_path"] = path_follower.planned_path
+    if path_follower.playback_index > 0:
+        state["path"] = path_follower.traveled_path
     state["path_valid"] = path_exists(
         env.map_layout,
         tuple(env.start_pos.tolist()),
@@ -172,7 +174,7 @@ async def run_episode(ws: WebSocket):
 
     while simulation_running:
         if use_scripted:
-            pose = path_follower.next_playback_pose()
+            pose = path_follower.current_playback_pose()
             if pose is None:
                 env.set_pose(env.goal_pos[0], env.goal_pos[1])
                 env.steps += 1
@@ -182,6 +184,7 @@ async def run_episode(ws: WebSocket):
                 (x, y), yaw = pose
                 if not env.set_pose(x, y, yaw):
                     continue
+                path_follower.advance_playback()
                 env.steps += 1
                 dist = float(np.linalg.norm(env.goal_pos - env.pos))
                 success = dist < 0.5

@@ -45,22 +45,14 @@ def _cell_center_safe(grid: np.ndarray, row: int, col: int) -> bool:
     return int(grid[row, col]) == 0 and is_safe_for_drone(grid, x, y)
 
 
-def _is_cardinal_clear(grid: np.ndarray, row: int, col: int, nr: int, nc: int) -> bool:
-    """Diagonal move allowed only if both adjacent cardinal cells are walkable."""
-    if nr == row or nc == col:
-        return True
-    return int(grid[row, nc]) == 0 and int(grid[nr, col]) == 0
-
-
 def _neighbors(grid: np.ndarray, cell: GridPos) -> List[GridPos]:
     row, col = cell
     h, w = grid.shape
     result = []
-    for dr, dc in ((0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+    for dr, dc in ((0, 1), (0, -1), (1, 0), (-1, 0)):
         nr, nc = row + dr, col + dc
         if 0 <= nr < h and 0 <= nc < w and grid[nr, nc] == 0:
-            if _is_cardinal_clear(grid, row, col, nr, nc):
-                result.append((nr, nc))
+            result.append((nr, nc))
     return result
 
 
@@ -88,8 +80,7 @@ def astar(grid: np.ndarray, start: GridPos, goal: GridPos) -> List[GridPos]:
             return path
 
         for neighbor in _neighbors(grid, current):
-            step_cost = 1.414 if neighbor[0] != current[0] and neighbor[1] != current[1] else 1.0
-            tentative = g_score[current] + step_cost
+            tentative = g_score[current] + 1.0
             if tentative < g_score.get(neighbor, float("inf")):
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative
@@ -171,32 +162,152 @@ def interpolate_path(
     if not waypoints:
         return []
 
-    dense: List[WorldPos] = [waypoints[0]]
+    dense: List[WorldPos] = []
 
     def _append_if_valid(x: float, y: float) -> None:
-        if is_safe_for_drone(grid, x, y):
-            if not dense or abs(dense[-1][0] - x) > 1e-4 or abs(dense[-1][1] - y) > 1e-4:
-                dense.append((x, y))
+        if not is_safe_for_drone(grid, x, y):
+            return
+        if dense and abs(dense[-1][0] - x) < 1e-4 and abs(dense[-1][1] - y) < 1e-4:
+            return
+        dense.append((x, y))
+
+    _append_if_valid(float(waypoints[0][0]), float(waypoints[0][1]))
 
     for i in range(len(waypoints) - 1):
-        ax, ay = waypoints[i]
-        bx, by = waypoints[i + 1]
-        x, y = float(ax), float(ay)
+        bx, by = float(waypoints[i + 1][0]), float(waypoints[i + 1][1])
+        if not dense:
+            break
+        x, y = dense[-1]
 
-        # Manhattan steps: move along X first, then Y (avoids diagonal wall clipping)
-        while abs(bx - x) >= step_size:
-            x += step_size if bx > x else -step_size
+        while abs(bx - x) > 1e-4:
+            step = step_size if bx > x else -step_size
+            if abs(bx - x) < abs(step):
+                x = bx
+            else:
+                x += step
             _append_if_valid(x, y)
-        x = float(bx)
 
-        while abs(by - y) >= step_size:
-            y += step_size if by > y else -step_size
+        while abs(by - y) > 1e-4:
+            step = step_size if by > y else -step_size
+            if abs(by - y) < abs(step):
+                y = by
+            else:
+                y += step
             _append_if_valid(x, y)
-        y = float(by)
-
-        _append_if_valid(bx, by)
 
     return dense
+
+
+def ensure_axis_aligned_path(
+    grid: np.ndarray, path: List[WorldPos]
+) -> List[WorldPos]:
+    """Break diagonal jumps into Manhattan corners so line rendering stays in corridors."""
+    if len(path) < 2:
+        return path
+
+    aligned: List[WorldPos] = [path[0]]
+    for x, y in path[1:]:
+        px, py = aligned[-1]
+        if abs(x - px) > 1e-4 and abs(y - py) > 1e-4:
+            for corner in ((x, py), (px, y)):
+                if is_safe_for_drone(grid, corner[0], corner[1]):
+                    if abs(corner[0] - aligned[-1][0]) > 1e-4 or abs(corner[1] - aligned[-1][1]) > 1e-4:
+                        aligned.append(corner)
+                    break
+
+        if abs(x - aligned[-1][0]) > 1e-4 or abs(y - aligned[-1][1]) > 1e-4:
+            if is_safe_for_drone(grid, x, y):
+                aligned.append((x, y))
+
+    return aligned
+
+
+def is_segment_safe(
+    grid: np.ndarray,
+    ax: float,
+    ay: float,
+    bx: float,
+    by: float,
+    step: float = 0.08,
+) -> bool:
+    """True if a straight segment stays clear of walls/crates for the drone."""
+    dist = math.hypot(bx - ax, by - ay)
+    if dist < 1e-6:
+        return is_safe_for_drone(grid, ax, ay)
+    steps = max(int(dist / step), 1)
+    for i in range(steps + 1):
+        t = i / steps
+        x = ax + (bx - ax) * t
+        y = ay + (by - ay) * t
+        if not is_safe_for_drone(grid, x, y):
+            return False
+    return True
+
+
+def _grid_step_direction(a: WorldPos, b: WorldPos) -> tuple[int, int]:
+    """Cardinal direction between two adjacent grid cell centers."""
+    ax, ay = int(round(a[0])), int(round(a[1]))
+    bx, by = int(round(b[0])), int(round(b[1]))
+    dx = max(-1, min(1, bx - ax))
+    dy = max(-1, min(1, by - ay))
+    return (dx, dy)
+
+
+def collapse_grid_waypoints(waypoints: List[WorldPos]) -> List[WorldPos]:
+    """Merge collinear A* cells into long straight legs (no zig-zag)."""
+    if len(waypoints) < 2:
+        return list(waypoints)
+
+    corners: List[WorldPos] = [waypoints[0]]
+    prev_dir = _grid_step_direction(waypoints[0], waypoints[1])
+    for i in range(2, len(waypoints)):
+        direction = _grid_step_direction(waypoints[i - 1], waypoints[i])
+        if direction != prev_dir:
+            corners.append(waypoints[i - 1])
+            prev_dir = direction
+    corners.append(waypoints[-1])
+    return corners
+
+
+def build_safe_corner_path(grid: np.ndarray, waypoints: List[WorldPos]) -> List[WorldPos]:
+    """Corner path from A* grid — straight horizontal/vertical legs only."""
+    return string_pull_corners(grid, collapse_grid_waypoints(waypoints))
+
+
+def string_pull_corners(grid: np.ndarray, corners: List[WorldPos]) -> List[WorldPos]:
+    """Skip intermediate corners when a direct straight leg is wall-safe."""
+    if len(corners) < 3:
+        return list(corners)
+
+    pulled: List[WorldPos] = [corners[0]]
+    i = 0
+    while i < len(corners) - 1:
+        best_j = i + 1
+        for j in range(len(corners) - 1, i, -1):
+            start = pulled[-1]
+            end = corners[j]
+            aligned = abs(start[0] - end[0]) < 1e-4 or abs(start[1] - end[1]) < 1e-4
+            if aligned and is_segment_safe(grid, start[0], start[1], end[0], end[1]):
+                best_j = j
+                break
+        pulled.append(corners[best_j])
+        i = best_j
+    return pulled
+
+
+def corner_playback_indices(corners: List[WorldPos], playback: List[WorldPos]) -> List[int]:
+    """Map each corner to the nearest index along the dense playback path."""
+    indices: List[int] = []
+    for cx, cy in corners:
+        best_j = 0
+        best_d = float("inf")
+        for j, (px, py) in enumerate(playback):
+            d = math.hypot(px - cx, py - cy)
+            if d < best_d:
+                best_d = d
+                best_j = j
+        indices.append(best_j)
+    return indices
 
 
 class PathFollower:
@@ -206,17 +317,27 @@ class PathFollower:
         self.grid = grid
         self.waypoints: List[WorldPos] = []
         self.playback_path: List[WorldPos] = []
+        self.corner_path: List[WorldPos] = []
+        self._corner_playback_idx: List[int] = []
         self.waypoint_index = 0
         self.playback_index = 0
 
     def reset(self, start: WorldPos, goal: WorldPos) -> None:
         self.waypoints = plan_world_path(self.grid, start, goal)
-        self.playback_path = interpolate_path(self.grid, self.waypoints, step_size=0.12)
+        dense = interpolate_path(self.grid, self.waypoints, step_size=0.12)
+        self.playback_path = ensure_axis_aligned_path(self.grid, dense)
+        self.corner_path = build_safe_corner_path(self.grid, self.waypoints)
+        self._corner_playback_idx = corner_playback_indices(
+            self.corner_path, self.playback_path
+        )
         self.waypoint_index = 0
         self.playback_index = 0
 
-    def next_playback_pose(self) -> tuple[WorldPos, float] | None:
-        """Return next pose along planned path for scripted demo."""
+    def advance_playback(self) -> None:
+        self.playback_index += 1
+
+    def current_playback_pose(self) -> tuple[WorldPos, float] | None:
+        """Return pose at current playback index without advancing."""
         if self.playback_index >= len(self.playback_path):
             return None
 
@@ -229,8 +350,31 @@ class PathFollower:
                 self.waypoints[-1][1] - y,
                 self.waypoints[-1][0] - x,
             )
-        self.playback_index += 1
         return (x, y), yaw
+
+    def next_playback_pose(self) -> tuple[WorldPos, float] | None:
+        """Return next pose along planned path for scripted demo."""
+        pose = self.current_playback_pose()
+        if pose is not None:
+            self.advance_playback()
+        return pose
+
+    @property
+    def traveled_path(self) -> List[List[float]]:
+        """Straight corner legs already traveled — wall-safe blue trail."""
+        if self.playback_index <= 0 or len(self.corner_path) < 2:
+            return []
+        if self.playback_index >= len(self.playback_path):
+            return [[p[0], p[1]] for p in self.corner_path]
+
+        result: List[List[float]] = [[self.corner_path[0][0], self.corner_path[0][1]]]
+        for i in range(1, len(self.corner_path)):
+            if self._corner_playback_idx[i] > self.playback_index:
+                break
+            end = self.corner_path[i]
+            result.append([end[0], end[1]])
+
+        return result
 
     def _current_target(self, pos: np.ndarray, goal_pos: np.ndarray) -> np.ndarray:
         while self.waypoint_index < len(self.waypoints):
@@ -287,7 +431,5 @@ class PathFollower:
 
     @property
     def planned_path(self) -> List[List[float]]:
-        """Dense collision-safe path for visualization (matches flight corridor)."""
-        return [[p[0], p[1]] for p in self.playback_path] if self.playback_path else [
-            [p[0], p[1]] for p in self.waypoints
-        ]
+        """Straight corner legs of the full route — wall-safe green path."""
+        return [[p[0], p[1]] for p in self.corner_path]
