@@ -10,6 +10,46 @@ import numpy as np
 
 GridPos = Tuple[int, int]
 WorldPos = Tuple[float, float]
+CELL_SIZE = 1.0
+DRONE_RADIUS = 0.25
+
+
+def world_to_grid(x: float, y: float) -> GridPos:
+    return int(round(y)), int(round(x))
+
+
+def grid_to_world(row: int, col: int) -> WorldPos:
+    return float(col), float(row)
+
+
+def is_safe_for_drone(grid: np.ndarray, x: float, y: float, radius: float = DRONE_RADIUS) -> bool:
+    """True if a drone with the given radius does not overlap walls/crates."""
+    h, w = grid.shape
+    for gi in range(h):
+        for gj in range(w):
+            if grid[gi, gj] == 0:
+                continue
+            cell_x, cell_y = float(gj), float(gi)
+            if (
+                x + radius > cell_x
+                and x - radius < cell_x + CELL_SIZE
+                and y + radius > cell_y
+                and y - radius < cell_y + CELL_SIZE
+            ):
+                return False
+    return True
+
+
+def _cell_center_safe(grid: np.ndarray, row: int, col: int) -> bool:
+    x, y = grid_to_world(row, col)
+    return int(grid[row, col]) == 0 and is_safe_for_drone(grid, x, y)
+
+
+def _is_cardinal_clear(grid: np.ndarray, row: int, col: int, nr: int, nc: int) -> bool:
+    """Diagonal move allowed only if both adjacent cardinal cells are walkable."""
+    if nr == row or nc == col:
+        return True
+    return int(grid[row, nc]) == 0 and int(grid[nr, col]) == 0
 
 
 def _neighbors(grid: np.ndarray, cell: GridPos) -> List[GridPos]:
@@ -19,7 +59,8 @@ def _neighbors(grid: np.ndarray, cell: GridPos) -> List[GridPos]:
     for dr, dc in ((0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)):
         nr, nc = row + dr, col + dc
         if 0 <= nr < h and 0 <= nc < w and grid[nr, nc] == 0:
-            result.append((nr, nc))
+            if _is_cardinal_clear(grid, row, col, nr, nc):
+                result.append((nr, nc))
     return result
 
 
@@ -58,14 +99,6 @@ def astar(grid: np.ndarray, start: GridPos, goal: GridPos) -> List[GridPos]:
     return []
 
 
-def world_to_grid(x: float, y: float) -> GridPos:
-    return int(round(y)), int(round(x))
-
-
-def grid_to_world(row: int, col: int) -> WorldPos:
-    return float(col), float(row)
-
-
 def is_walkable(grid: np.ndarray, x: float, y: float) -> bool:
     row, col = world_to_grid(x, y)
     if row < 0 or col < 0 or row >= grid.shape[0] or col >= grid.shape[1]:
@@ -74,21 +107,26 @@ def is_walkable(grid: np.ndarray, x: float, y: float) -> bool:
 
 
 def snap_to_walkable(grid: np.ndarray, x: float, y: float) -> WorldPos | None:
-    """Snap click position to nearest walkable cell center."""
+    """Snap click position to nearest safe walkable cell center."""
     row, col = world_to_grid(x, y)
     h, w = grid.shape
     if 0 <= row < h and 0 <= col < w and grid[row, col] == 0:
-        return grid_to_world(row, col)
+        snapped = grid_to_world(row, col)
+        if is_safe_for_drone(grid, snapped[0], snapped[1]):
+            return snapped
 
     best: WorldPos | None = None
     best_dist = float("inf")
-    for radius in range(1, 6):
+    for radius in range(1, 8):
         for dr in range(-radius, radius + 1):
             for dc in range(-radius, radius + 1):
                 nr, nc = row + dr, col + dc
                 if nr < 0 or nc < 0 or nr >= h or nc >= w:
                     continue
                 if grid[nr, nc] != 0:
+                    continue
+                wx, wy = grid_to_world(nr, nc)
+                if not is_safe_for_drone(grid, wx, wy):
                     continue
                 dist = dr * dr + dc * dc
                 if dist < best_dist:
@@ -124,25 +162,40 @@ def wrap_angle(angle: float) -> float:
     return angle
 
 
-def interpolate_path(waypoints: List[WorldPos], step_size: float = 0.15) -> List[WorldPos]:
-    """Create dense points along waypoint path for smooth demo playback."""
+def interpolate_path(
+    grid: np.ndarray,
+    waypoints: List[WorldPos],
+    step_size: float = 0.12,
+) -> List[WorldPos]:
+    """Dense axis-aligned path that stays in walkable cells (no wall clipping)."""
     if not waypoints:
         return []
+
     dense: List[WorldPos] = [waypoints[0]]
+
+    def _append_if_valid(x: float, y: float) -> None:
+        if is_safe_for_drone(grid, x, y):
+            if not dense or abs(dense[-1][0] - x) > 1e-4 or abs(dense[-1][1] - y) > 1e-4:
+                dense.append((x, y))
+
     for i in range(len(waypoints) - 1):
-        a = np.array(waypoints[i], dtype=np.float32)
-        b = np.array(waypoints[i + 1], dtype=np.float32)
-        segment = b - a
-        length = float(np.linalg.norm(segment))
-        if length < 1e-6:
-            continue
-        direction = segment / length
-        traveled = step_size
-        while traveled < length:
-            point = a + direction * traveled
-            dense.append((float(point[0]), float(point[1])))
-            traveled += step_size
-        dense.append((float(b[0]), float(b[1])))
+        ax, ay = waypoints[i]
+        bx, by = waypoints[i + 1]
+        x, y = float(ax), float(ay)
+
+        # Manhattan steps: move along X first, then Y (avoids diagonal wall clipping)
+        while abs(bx - x) >= step_size:
+            x += step_size if bx > x else -step_size
+            _append_if_valid(x, y)
+        x = float(bx)
+
+        while abs(by - y) >= step_size:
+            y += step_size if by > y else -step_size
+            _append_if_valid(x, y)
+        y = float(by)
+
+        _append_if_valid(bx, by)
+
     return dense
 
 
@@ -158,7 +211,7 @@ class PathFollower:
 
     def reset(self, start: WorldPos, goal: WorldPos) -> None:
         self.waypoints = plan_world_path(self.grid, start, goal)
-        self.playback_path = interpolate_path(self.waypoints, step_size=0.18)
+        self.playback_path = interpolate_path(self.grid, self.waypoints, step_size=0.12)
         self.waypoint_index = 0
         self.playback_index = 0
 
@@ -234,4 +287,7 @@ class PathFollower:
 
     @property
     def planned_path(self) -> List[List[float]]:
-        return [[p[0], p[1]] for p in self.waypoints]
+        """Dense collision-safe path for visualization (matches flight corridor)."""
+        return [[p[0], p[1]] for p in self.playback_path] if self.playback_path else [
+            [p[0], p[1]] for p in self.waypoints
+        ]

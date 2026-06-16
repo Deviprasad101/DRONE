@@ -180,7 +180,8 @@ async def run_episode(ws: WebSocket):
                 reason = "Goal reached!"
             else:
                 (x, y), yaw = pose
-                env.set_pose(x, y, yaw)
+                if not env.set_pose(x, y, yaw):
+                    continue
                 env.steps += 1
                 dist = float(np.linalg.norm(env.goal_pos - env.pos))
                 success = dist < 0.5
