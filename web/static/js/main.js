@@ -18,7 +18,6 @@ const readoutGoal = document.getElementById("readout-goal");
 const pickHint = document.getElementById("pick-hint");
 
 const btnStart = document.getElementById("btn-start");
-const btnTrain = document.getElementById("btn-train");
 const btnReset = document.getElementById("btn-reset");
 const btnPickStart = document.getElementById("btn-pick-start");
 const btnPickGoal = document.getElementById("btn-pick-goal");
@@ -42,7 +41,6 @@ function setStatus(text, cls) {
 
 function setButtonsRunning(running) {
   btnStart.disabled = running;
-  btnTrain.disabled = running;
   btnPickStart.disabled = running;
   btnPickGoal.disabled = running;
 }
@@ -174,13 +172,6 @@ function connectWebSocket() {
         log(`Episode ended: ${data.reason}`, "error");
       }
       btnStart.textContent = "Start Demo";
-    } else if (data.type === "training") {
-      log(data.message, data.level || "info");
-      if (data.done) {
-        setButtonsRunning(false);
-        btnTrain.textContent = "Quick Train";
-        setStatus("Training Complete", "success");
-      }
     } else if (data.type === "reset") {
       totalReward = 0;
       hudReward.textContent = "0";
@@ -232,18 +223,6 @@ btnStart.addEventListener("click", async () => {
   }, 300);
 });
 
-btnTrain.addEventListener("click", () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) connectWebSocket();
-  setTimeout(() => {
-    setPickMode(null);
-    ws.send(JSON.stringify({ action: "train", timesteps: 20000 }));
-    setButtonsRunning(true);
-    btnTrain.textContent = "Training...";
-    setStatus("Training", "running");
-    log("Quick training started (20k steps)...", "info");
-  }, 300);
-});
-
 btnReset.addEventListener("click", () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) connectWebSocket();
   setTimeout(() => {
@@ -251,7 +230,6 @@ btnReset.addEventListener("click", () => {
     ws.send(JSON.stringify({ action: "reset" }));
     setButtonsRunning(false);
     btnStart.textContent = "Start Demo";
-    btnTrain.textContent = "Quick Train";
     totalReward = 0;
     hudReward.textContent = "0";
     log("Reset requested", "info");

@@ -60,8 +60,7 @@ def main():
 
     print_banner(port)
     print("  Controls:")
-    print("    - Start Demo  : Run trained/heuristic agent navigation")
-    print("    - Quick Train : Train PPO agent (20k steps)")
+    print("    - Start Demo  : Run navigation along planned path")
     print("    - Reset       : Reset environment")
     print()
 

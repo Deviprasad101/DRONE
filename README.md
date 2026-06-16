@@ -42,9 +42,6 @@ Open **http://localhost:8000** in your browser.
 ```bash
 # Full training (100k steps, ~5-10 min)
 python train.py
-
-# Quick training from UI
-# Click "Quick Train" button (20k steps)
 ```
 
 After training, the model is saved to `models/ppo_indoor_drone.zip` and loaded automatically.
@@ -83,8 +80,7 @@ DRONE/
 
 | Button | Action |
 |--------|--------|
-| **Start Demo** | Run the RL agent from start to goal |
-| **Quick Train** | Train PPO for 20,000 timesteps |
+| **Start Demo** | Run navigation from start to goal |
 | **Reset** | Reset drone to start position |
 
 ## Tech Stack

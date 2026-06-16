@@ -89,12 +89,6 @@ body {
   background: var(--accent-dark);
 }
 
-.btn.secondary {
-  background: #1e3a2f;
-  border-color: #22c55e55;
-  color: #86efac;
-}
-
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

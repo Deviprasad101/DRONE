@@ -26,7 +26,6 @@ app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 env = IndoorDroneEnv()
 path_follower = PathFollower(env.map_layout)
 model = None
-training_lock = asyncio.Lock()
 simulation_running = False
 
 
@@ -242,32 +241,6 @@ async def run_episode(ws: WebSocket):
         await asyncio.sleep(0.05 if use_scripted else 0.06)
 
 
-async def run_training(ws: WebSocket, timesteps: int = 20000):
-    global model
-    async with training_lock:
-        await ws.send_json(
-            {"type": "training", "message": f"Training PPO for {timesteps} steps..."}
-        )
-
-        def _train():
-            from train import train
-
-            train(total_timesteps=timesteps)
-
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _train)
-
-        loaded = load_model()
-        await ws.send_json(
-            {
-                "type": "training",
-                "message": f"Training complete! Model {'loaded' if loaded else 'saved'}.",
-                "done": True,
-                "level": "success",
-            }
-        )
-
-
 @app.websocket("/ws/simulation")
 async def websocket_simulation(ws: WebSocket):
     global simulation_running
@@ -315,10 +288,6 @@ async def websocket_simulation(ws: WebSocket):
                     )
                 else:
                     await ws.send_json({"type": "error", "message": result["error"]})
-
-            elif action == "train":
-                timesteps = msg.get("timesteps", 20000)
-                asyncio.create_task(run_training(ws, timesteps))
 
     except WebSocketDisconnect:
         simulation_running = False
