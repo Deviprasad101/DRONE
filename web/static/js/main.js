@@ -1,10 +1,9 @@
-import { DroneScene, drawLidar } from "./scene.js";
+import { DroneScene } from "./scene.js";
 
 const canvas = document.getElementById("canvas3d");
 const canvasWrap = document.getElementById("canvas-wrap");
 const pickOverlay = document.getElementById("pick-overlay");
 const pickOverlayText = document.getElementById("pick-overlay-text");
-const lidarCanvas = document.getElementById("lidar-canvas");
 const scene = new DroneScene(canvas);
 scene.animate();
 
@@ -12,7 +11,6 @@ const hudSteps = document.getElementById("hud-steps");
 const hudDist = document.getElementById("hud-dist");
 const hudStatus = document.getElementById("hud-status");
 const hudReward = document.getElementById("hud-reward");
-const logEl = document.getElementById("log");
 const readoutStart = document.getElementById("readout-start");
 const readoutGoal = document.getElementById("readout-goal");
 const pickHint = document.getElementById("pick-hint");
@@ -25,14 +23,6 @@ const btnPickGoal = document.getElementById("btn-pick-goal");
 let ws = null;
 let totalReward = 0;
 let pickMode = null;
-
-function log(msg, type = "") {
-  const entry = document.createElement("div");
-  entry.className = `entry ${type}`;
-  entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  logEl.prepend(entry);
-  if (logEl.children.length > 50) logEl.lastChild.remove();
-}
 
 function setStatus(text, cls) {
   hudStatus.textContent = text;
@@ -99,31 +89,21 @@ async function onMapClick(type, x, y) {
       scene.clearPath();
       applyState(data.state);
       setPickMode(null);
-      const label = data.point_type === "start" ? "Start" : "Goal";
-      log(
-        `${label} set to (${data.position[0].toFixed(0)}, ${data.position[1].toFixed(0)})`,
-        "success"
-      );
       if (data.warning) {
-        log(data.warning, "error");
         setStatus("Adjust other point", "failed");
-      } else if (data.state.path_valid) {
-        setStatus("Route Ready", "idle");
-        log("Collision-free path planned.", "info");
       } else {
         setStatus("Route Ready", "idle");
       }
     } else {
-      log(data.error || "Could not set point", "error");
+      setStatus(data.error || "Could not set point", "failed");
     }
   } catch (e) {
-    log("Failed to set point. Is the server running?", "error");
+    setStatus("Server unavailable", "failed");
   }
 }
 
 function applyState(state) {
   scene.updateState(state);
-  drawLidar(lidarCanvas, state.lidar || [], state.yaw || 0);
   hudDist.textContent = state.dist_to_goal?.toFixed(2) ?? "--";
   hudSteps.textContent = state.steps ?? 0;
   updateReadout(state);
@@ -135,7 +115,7 @@ async function fetchInitialState() {
     const state = await res.json();
     applyState(state);
   } catch (e) {
-    log("Failed to load initial state", "error");
+    setStatus("Load failed", "failed");
   }
 }
 
@@ -145,8 +125,6 @@ function connectWebSocket() {
 
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${protocol}//${location.host}/ws/simulation`);
-
-  ws.onopen = () => log("Connected to simulation", "info");
 
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -158,7 +136,7 @@ function connectWebSocket() {
         hudReward.textContent = totalReward.toFixed(1);
       }
     } else if (data.type === "error") {
-      log(data.message, "error");
+      setStatus(data.message, "failed");
       setButtonsRunning(false);
       btnStart.textContent = "Start Demo";
     } else if (data.type === "done") {
@@ -166,10 +144,8 @@ function connectWebSocket() {
       setPickMode(null);
       if (data.success) {
         setStatus("Goal Reached!", "success");
-        log(`Episode complete! Steps: ${data.steps}`, "success");
       } else {
         setStatus(data.reason || "Failed", "failed");
-        log(`Episode ended: ${data.reason}`, "error");
       }
       btnStart.textContent = "Start Demo";
     } else if (data.type === "reset") {
@@ -178,12 +154,11 @@ function connectWebSocket() {
       scene.clearPath();
       applyState(data.state);
       setStatus("Idle", "idle");
-      log("Environment reset", "info");
     }
   };
 
-  ws.onclose = () => log("Disconnected", "error");
-  ws.onerror = () => log("WebSocket error", "error");
+  ws.onclose = () => setStatus("Disconnected", "failed");
+  ws.onerror = () => setStatus("Connection error", "failed");
 }
 
 pickOverlay.addEventListener("click", (e) => {
@@ -192,7 +167,7 @@ pickOverlay.addEventListener("click", (e) => {
   if (!pickMode) return;
   const picked = scene.pickAtScreen(e.clientX, e.clientY);
   if (!picked) {
-    log("Click on the gray floor area inside the building.", "error");
+    setStatus("Click open floor", "failed");
   }
 });
 
@@ -201,11 +176,11 @@ btnStart.addEventListener("click", async () => {
     const res = await fetch("/api/state");
     const state = await res.json();
     if (!state.path_valid) {
-      log("Set valid start and goal points with a clear path first.", "error");
+      setStatus("Set valid route first", "failed");
       return;
     }
   } catch (e) {
-    log("Could not verify route.", "error");
+    setStatus("Could not verify route", "failed");
     return;
   }
 
@@ -219,7 +194,6 @@ btnStart.addEventListener("click", async () => {
     setStatus("Navigating", "running");
     totalReward = 0;
     hudReward.textContent = "0";
-    log("Starting navigation along planned path...", "info");
   }, 300);
 });
 
@@ -232,7 +206,6 @@ btnReset.addEventListener("click", () => {
     btnStart.textContent = "Start Demo";
     totalReward = 0;
     hudReward.textContent = "0";
-    log("Reset requested", "info");
   }, 300);
 });
 
