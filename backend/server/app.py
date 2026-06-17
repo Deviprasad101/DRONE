@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from env.indoor_drone_env import IndoorDroneEnv
-from agent.navigator import PathFollower, path_exists, snap_to_walkable
+from agent.navigator import PathFollower, path_exists, snap_to_walkable, sanitize_display_path
 
 WEB_DIR = Path(__file__).parent.parent.parent / "frontend"
 MODELS_DIR = Path(__file__).parent.parent / "models"
@@ -69,9 +69,11 @@ async def index():
 def build_state() -> dict:
     state = env.get_state_dict()
     state["planned_path"] = path_follower.planned_path
-    # Blue trail: actual positions from simulation (path_history), not corner shortcuts.
-    if len(state.get("path", [])) < 2 and path_follower.playback_index > 0:
+    state["planned_legs"] = path_follower.planned_legs
+    if path_follower.playback_index > 0:
         state["path"] = path_follower.traveled_path
+    elif len(state.get("path", [])) > 1:
+        state["path"] = sanitize_display_path(env.map_layout, state["path"])
     state["path_valid"] = path_exists(
         env.map_layout,
         tuple(env.start_pos.tolist()),
@@ -191,7 +193,9 @@ async def run_episode(ws: WebSocket):
                 (x, y), yaw = pose
                 if env.set_pose(x, y, yaw):
                     env.steps += 1
-                path_follower.advance_playback()
+                    path_follower.advance_playback()
+                else:
+                    path_follower.advance_playback()
 
                 dist = float(np.linalg.norm(env.goal_pos - env.pos))
                 if dist < 0.5:

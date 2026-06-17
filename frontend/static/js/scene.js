@@ -302,8 +302,10 @@ export class DroneScene {
     line.geometry.computeBoundingSphere();
   }
 
-  _ensurePlannedLine(points) {
-    const key = pathKey(points);
+  _ensurePlannedLine(points, legs) {
+    const key = legs?.length
+      ? `legs:${legs.length}:${legs.map((l) => pathKey(l)).join("|")}`
+      : pathKey(points);
     if (key === this._plannedKey && this.plannedLine) return;
     this._plannedKey = key;
 
@@ -314,16 +316,30 @@ export class DroneScene {
       this.plannedLine = null;
     }
 
-    if (!points || points.length < 2) return;
+    const segmentPoints = [];
+    if (legs && legs.length > 0) {
+      for (const leg of legs) {
+        if (!leg || leg.length < 2) continue;
+        const a = pathToVectors([leg[0]], PLANNED_PATH_Y)[0];
+        const b = pathToVectors([leg[1]], PLANNED_PATH_Y)[0];
+        segmentPoints.push(a, b);
+      }
+    } else if (points && points.length > 1) {
+      const vectors = pathToVectors(points, PLANNED_PATH_Y);
+      for (let i = 0; i < vectors.length - 1; i++) {
+        segmentPoints.push(vectors[i], vectors[i + 1]);
+      }
+    }
 
-    const vectors = pathToVectors(points, PLANNED_PATH_Y);
-    const geometry = new THREE.BufferGeometry().setFromPoints(vectors);
-    this.plannedLine = new THREE.Line(
+    if (segmentPoints.length < 2) return;
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(segmentPoints);
+    this.plannedLine = new THREE.LineSegments(
       geometry,
       new THREE.LineBasicMaterial({
         color: 0x22c55e,
         transparent: true,
-        opacity: 0.85,
+        opacity: 0.9,
       })
     );
     this.scene.add(this.plannedLine);
@@ -343,10 +359,14 @@ export class DroneScene {
     }
 
     const vectors = pathToVectors(points, FLIGHT_PATH_Y);
+    const segmentPoints = [];
+    for (let i = 0; i < vectors.length - 1; i++) {
+      segmentPoints.push(vectors[i], vectors[i + 1]);
+    }
 
     if (!this.pathLine) {
       const geometry = new THREE.BufferGeometry();
-      this.pathLine = new THREE.Line(
+      this.pathLine = new THREE.LineSegments(
         geometry,
         new THREE.LineBasicMaterial({
           color: 0x60a5fa,
@@ -357,8 +377,8 @@ export class DroneScene {
       this.scene.add(this.pathLine);
     }
 
-    this._setLinePoints(this.pathLine, vectors);
-    this._trailCount = vectors.length;
+    this._setLinePoints(this.pathLine, segmentPoints);
+    this._trailCount = segmentPoints.length;
   }
 
   _createMarker(color, emissive) {
@@ -439,7 +459,7 @@ export class DroneScene {
     }
 
     if (state.planned_path && state.planned_path.length > 1) {
-      this._ensurePlannedLine(state.planned_path);
+      this._ensurePlannedLine(state.planned_path, state.planned_legs);
     }
 
     if (state.path && state.path.length > 1) {

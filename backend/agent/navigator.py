@@ -46,6 +46,52 @@ def safe_grid_to_world(grid: np.ndarray, row: int, col: int) -> WorldPos:
     return best if best is not None else (x, y)
 
 
+def _cells_along_segment(
+    ax: float, ay: float, bx: float, by: float
+) -> set[GridPos]:
+    """Grid cells touched by a world-space segment (matches floor/wall tiles)."""
+    cells: set[GridPos] = set()
+    row0, col0 = world_to_grid(ax, ay)
+    row1, col1 = world_to_grid(bx, by)
+    drow = abs(row1 - row0)
+    dcol = abs(col1 - col0)
+    srow = 1 if row0 < row1 else -1
+    scol = 1 if col0 < col1 else -1
+    err = dcol - drow
+    row, col = row0, col0
+
+    while True:
+        cells.add((row, col))
+        if row == row1 and col == col1:
+            break
+        e2 = 2 * err
+        if e2 > -drow:
+            err -= drow
+            col += scol
+        if e2 < dcol:
+            err += dcol
+            row += srow
+
+    dist = math.hypot(bx - ax, by - ay)
+    steps = max(int(dist * 4), 4)
+    for i in range(steps + 1):
+        t = i / steps
+        x = ax + (bx - ax) * t
+        y = ay + (by - ay) * t
+        cells.add(world_to_grid(x, y))
+    return cells
+
+
+def _point_clear(grid: np.ndarray, x: float, y: float) -> bool:
+    row, col = world_to_grid(x, y)
+    h, w = grid.shape
+    if row < 0 or col < 0 or row >= h or col >= w:
+        return False
+    if int(grid[row, col]) != 0:
+        return False
+    return is_safe_for_drone(grid, x, y)
+
+
 def is_safe_for_drone(grid: np.ndarray, x: float, y: float, radius: float = DRONE_RADIUS) -> bool:
     """True if a drone with the given radius does not overlap walls/crates."""
     h, w = grid.shape
@@ -182,28 +228,31 @@ def interpolate_path(
     waypoints: List[WorldPos],
     step_size: float = 0.12,
 ) -> List[WorldPos]:
-    """Dense points along straight lines between waypoints (no Manhattan zig-zag)."""
+    """Dense points along straight lines between waypoints (no gaps through walls)."""
     if not waypoints:
         return []
 
     dense: List[WorldPos] = []
 
     def _append_if_valid(x: float, y: float) -> None:
-        if not is_safe_for_drone(grid, x, y):
+        if not _point_clear(grid, x, y):
             return
         if dense and abs(dense[-1][0] - x) < 1e-4 and abs(dense[-1][1] - y) < 1e-4:
             return
         dense.append((x, y))
-
-    _append_if_valid(float(waypoints[0][0]), float(waypoints[0][1]))
 
     for i in range(len(waypoints) - 1):
         ax, ay = float(waypoints[i][0]), float(waypoints[i][1])
         bx, by = float(waypoints[i + 1][0]), float(waypoints[i + 1][1])
         if not is_segment_safe(grid, ax, ay, bx, by):
             continue
+
+        if not dense:
+            _append_if_valid(ax, ay)
+
         dist = math.hypot(bx - ax, by - ay)
         if dist < 1e-6:
+            _append_if_valid(bx, by)
             continue
         steps = max(int(dist / step_size), 1)
         for s in range(1, steps + 1):
@@ -245,16 +294,23 @@ def is_segment_safe(
     by: float,
     step: float = 0.08,
 ) -> bool:
-    """True if a straight segment stays clear of walls/crates for the drone."""
+    """True if a straight segment stays on open floor tiles and clear of walls."""
+    h, w = grid.shape
+    for row, col in _cells_along_segment(ax, ay, bx, by):
+        if row < 0 or col < 0 or row >= h or col >= w:
+            return False
+        if int(grid[row, col]) != 0:
+            return False
+
     dist = math.hypot(bx - ax, by - ay)
     if dist < 1e-6:
-        return is_safe_for_drone(grid, ax, ay)
+        return _point_clear(grid, ax, ay)
     steps = max(int(dist / step), 1)
     for i in range(steps + 1):
         t = i / steps
         x = ax + (bx - ax) * t
         y = ay + (by - ay) * t
-        if not is_safe_for_drone(grid, x, y):
+        if not _point_clear(grid, x, y):
             return False
     return True
 
@@ -334,7 +390,7 @@ def refine_safe_waypoints(grid: np.ndarray, waypoints: List[WorldPos]) -> List[W
             if math.hypot(bridge[0] - last[0], bridge[1] - last[1]) > 1e-4:
                 refined.append(bridge)
             refined.append(target)
-        else:
+        elif is_segment_safe(grid, last[0], last[1], target[0], target[1]):
             refined.append(target)
     return refined
 
@@ -358,7 +414,7 @@ def _find_safe_bridge(
     for x10 in range(xi, xf + 1):
         for y10 in range(yi, yf + 1):
             x, y = x10 / 10.0, y10 / 10.0
-            if not is_walkable(grid, x, y) or not is_safe_for_drone(grid, x, y):
+            if not _point_clear(grid, x, y):
                 continue
             if not is_segment_safe(grid, start[0], start[1], x, y):
                 continue
@@ -496,6 +552,26 @@ def _complete_path_to_goal(
     return path
 
 
+def _safe_chain_along_grid(grid: np.ndarray, waypoints: List[WorldPos]) -> List[WorldPos]:
+    """Walk the A* route using only wall-clear straight hops."""
+    if not waypoints:
+        return []
+
+    chain: List[WorldPos] = [waypoints[0]]
+    for target in waypoints[1:]:
+        last = chain[-1]
+        if is_segment_safe(grid, last[0], last[1], target[0], target[1]):
+            chain.append(target)
+            continue
+        bridge = _find_safe_bridge(grid, last, target)
+        if bridge is not None:
+            if math.hypot(bridge[0] - last[0], bridge[1] - last[1]) > 1e-4:
+                chain.append(bridge)
+            if math.hypot(target[0] - chain[-1][0], target[1] - chain[-1][1]) > 1e-4:
+                chain.append(target)
+    return chain
+
+
 def build_safe_corner_path(grid: np.ndarray, waypoints: List[WorldPos]) -> List[WorldPos]:
     """Fewest straight collision-free legs — direct line when possible, else string-pull."""
     if not waypoints:
@@ -517,7 +593,30 @@ def build_safe_corner_path(grid: np.ndarray, waypoints: List[WorldPos]) -> List[
             pulled.extend(tail[1:])
         pulled = _complete_path_to_goal(grid, pulled, end)
 
+    if not pulled or math.hypot(pulled[-1][0] - end[0], pulled[-1][1] - end[1]) > 0.45:
+        fallback = _safe_chain_along_grid(grid, waypoints)
+        if fallback and len(fallback) >= len(pulled or []):
+            pulled = fallback
+        pulled = _complete_path_to_goal(grid, pulled or [start], end)
+
     return merge_collinear_corners(grid, pulled)
+
+
+def sanitize_display_path(
+    grid: np.ndarray, points: List[List[float]]
+) -> List[List[float]]:
+    """Drop chords that would draw through walls between history points."""
+    if len(points) < 2:
+        return [list(p) for p in points]
+
+    clean: List[List[float]] = [list(points[0])]
+    for px, py in points[1:]:
+        last = clean[-1]
+        if is_segment_safe(grid, last[0], last[1], float(px), float(py)):
+            clean.append([float(px), float(py)])
+        elif not clean or math.hypot(clean[-1][0] - px, clean[-1][1] - py) > 1e-3:
+            clean.append([float(px), float(py)])
+    return clean
 
 
 def corner_playback_indices(corners: List[WorldPos], playback: List[WorldPos]) -> List[int]:
@@ -651,3 +750,14 @@ class PathFollower:
         if self.playback_path:
             return [[p[0], p[1]] for p in self.playback_path]
         return [[p[0], p[1]] for p in self.corner_path]
+
+    @property
+    def planned_legs(self) -> List[List[List[float]]]:
+        """Straight safe legs for line-segment rendering."""
+        legs: List[List[List[float]]] = []
+        for i in range(len(self.corner_path) - 1):
+            a = self.corner_path[i]
+            b = self.corner_path[i + 1]
+            if is_segment_safe(self.grid, a[0], a[1], b[0], b[1]):
+                legs.append([[a[0], a[1]], [b[0], b[1]]])
+        return legs
