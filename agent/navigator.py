@@ -22,6 +22,30 @@ def grid_to_world(row: int, col: int) -> WorldPos:
     return float(col), float(row)
 
 
+def safe_grid_to_world(grid: np.ndarray, row: int, col: int) -> WorldPos:
+    """Cell center, nudged slightly if the drone footprint would clip a wall."""
+    x, y = grid_to_world(row, col)
+    if is_safe_for_drone(grid, x, y):
+        return (x, y)
+
+    best: WorldPos | None = None
+    best_dist = float("inf")
+    for row_off in (-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3):
+        for col_off in (-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3):
+            if row_off == 0.0 and col_off == 0.0:
+                continue
+            sx, sy = x + col_off, y + row_off
+            if not is_walkable(grid, sx, sy):
+                continue
+            if not is_safe_for_drone(grid, sx, sy):
+                continue
+            dist = row_off * row_off + col_off * col_off
+            if dist < best_dist:
+                best_dist = dist
+                best = (sx, sy)
+    return best if best is not None else (x, y)
+
+
 def is_safe_for_drone(grid: np.ndarray, x: float, y: float, radius: float = DRONE_RADIUS) -> bool:
     """True if a drone with the given radius does not overlap walls/crates."""
     h, w = grid.shape
@@ -142,7 +166,7 @@ def plan_world_path(
     cells = astar(grid, start_cell, goal_cell)
     if not cells:
         return []
-    return [grid_to_world(r, c) for r, c in cells]
+    return [safe_grid_to_world(grid, r, c) for r, c in cells]
 
 
 def wrap_angle(angle: float) -> float:
@@ -158,7 +182,7 @@ def interpolate_path(
     waypoints: List[WorldPos],
     step_size: float = 0.12,
 ) -> List[WorldPos]:
-    """Dense axis-aligned path that stays in walkable cells (no wall clipping)."""
+    """Dense points along straight lines between waypoints (no Manhattan zig-zag)."""
     if not waypoints:
         return []
 
@@ -174,26 +198,17 @@ def interpolate_path(
     _append_if_valid(float(waypoints[0][0]), float(waypoints[0][1]))
 
     for i in range(len(waypoints) - 1):
+        ax, ay = float(waypoints[i][0]), float(waypoints[i][1])
         bx, by = float(waypoints[i + 1][0]), float(waypoints[i + 1][1])
-        if not dense:
-            break
-        x, y = dense[-1]
-
-        while abs(bx - x) > 1e-4:
-            step = step_size if bx > x else -step_size
-            if abs(bx - x) < abs(step):
-                x = bx
-            else:
-                x += step
-            _append_if_valid(x, y)
-
-        while abs(by - y) > 1e-4:
-            step = step_size if by > y else -step_size
-            if abs(by - y) < abs(step):
-                y = by
-            else:
-                y += step
-            _append_if_valid(x, y)
+        if not is_segment_safe(grid, ax, ay, bx, by):
+            continue
+        dist = math.hypot(bx - ax, by - ay)
+        if dist < 1e-6:
+            continue
+        steps = max(int(dist / step_size), 1)
+        for s in range(1, steps + 1):
+            t = s / steps
+            _append_if_valid(ax + (bx - ax) * t, ay + (by - ay) * t)
 
     return dense
 
@@ -269,30 +284,240 @@ def collapse_grid_waypoints(waypoints: List[WorldPos]) -> List[WorldPos]:
     return corners
 
 
-def build_safe_corner_path(grid: np.ndarray, waypoints: List[WorldPos]) -> List[WorldPos]:
-    """Corner path from A* grid — straight horizontal/vertical legs only."""
-    return string_pull_corners(grid, collapse_grid_waypoints(waypoints))
-
-
 def string_pull_corners(grid: np.ndarray, corners: List[WorldPos]) -> List[WorldPos]:
-    """Skip intermediate corners when a direct straight leg is wall-safe."""
-    if len(corners) < 3:
+    """Fewest straight legs along a polyline; every leg must pass is_segment_safe."""
+    if len(corners) < 2:
         return list(corners)
 
     pulled: List[WorldPos] = [corners[0]]
     i = 0
     while i < len(corners) - 1:
-        best_j = i + 1
+        start = pulled[-1]
+        best_j = None
         for j in range(len(corners) - 1, i, -1):
-            start = pulled[-1]
             end = corners[j]
-            aligned = abs(start[0] - end[0]) < 1e-4 or abs(start[1] - end[1]) < 1e-4
-            if aligned and is_segment_safe(grid, start[0], start[1], end[0], end[1]):
+            if is_segment_safe(grid, start[0], start[1], end[0], end[1]):
                 best_j = j
                 break
-        pulled.append(corners[best_j])
-        i = best_j
+        if best_j is not None:
+            pulled.append(corners[best_j])
+            i = best_j
+            continue
+
+        next_j = None
+        for j in range(i + 1, len(corners)):
+            end = corners[j]
+            if is_segment_safe(grid, start[0], start[1], end[0], end[1]):
+                next_j = j
+                break
+        if next_j is None:
+            break
+        pulled.append(corners[next_j])
+        i = next_j
     return pulled
+
+
+def refine_safe_waypoints(grid: np.ndarray, waypoints: List[WorldPos]) -> List[WorldPos]:
+    """Insert bridge points so each consecutive hop can be a safe straight segment."""
+    if len(waypoints) < 2:
+        return list(waypoints)
+
+    refined: List[WorldPos] = [waypoints[0]]
+    for target in waypoints[1:]:
+        last = refined[-1]
+        if is_segment_safe(grid, last[0], last[1], target[0], target[1]):
+            refined.append(target)
+            continue
+
+        bridge = _find_safe_bridge(grid, last, target)
+        if bridge is not None:
+            if math.hypot(bridge[0] - last[0], bridge[1] - last[1]) > 1e-4:
+                refined.append(bridge)
+            refined.append(target)
+        else:
+            refined.append(target)
+    return refined
+
+
+def _find_safe_bridge(
+    grid: np.ndarray, start: WorldPos, goal: WorldPos
+) -> WorldPos | None:
+    """Find one via-point so both straight legs avoid walls."""
+    min_x = min(start[0], goal[0]) - 0.6
+    max_x = max(start[0], goal[0]) + 0.6
+    min_y = min(start[1], goal[1]) - 0.6
+    max_y = max(start[1], goal[1]) + 0.6
+
+    best: WorldPos | None = None
+    best_cost = float("inf")
+    xi = int(math.floor(min_x * 10))
+    xf = int(math.ceil(max_x * 10))
+    yi = int(math.floor(min_y * 10))
+    yf = int(math.ceil(max_y * 10))
+
+    for x10 in range(xi, xf + 1):
+        for y10 in range(yi, yf + 1):
+            x, y = x10 / 10.0, y10 / 10.0
+            if not is_walkable(grid, x, y) or not is_safe_for_drone(grid, x, y):
+                continue
+            if not is_segment_safe(grid, start[0], start[1], x, y):
+                continue
+            if not is_segment_safe(grid, x, y, goal[0], goal[1]):
+                continue
+            cost = math.hypot(x - start[0], y - start[1]) + math.hypot(
+                goal[0] - x, goal[1] - y
+            )
+            if cost < best_cost:
+                best_cost = cost
+                best = (x, y)
+    return best
+
+
+def _nearest_path_index(path: List[WorldPos], point: WorldPos) -> int:
+    best_i = 0
+    best_d = float("inf")
+    for i, (x, y) in enumerate(path):
+        d = math.hypot(x - point[0], y - point[1])
+        if d < best_d:
+            best_d = d
+            best_i = i
+    return best_i
+
+
+def _subpath_between(path: List[WorldPos], a: WorldPos, b: WorldPos) -> List[WorldPos]:
+    ia = _nearest_path_index(path, a)
+    ib = _nearest_path_index(path, b)
+    if ia <= ib:
+        return path[ia : ib + 1]
+    return path[ib : ia + 1][::-1]
+
+
+def _bridge_unsafe_segment(
+    grid: np.ndarray,
+    start: WorldPos,
+    goal: WorldPos,
+    grid_path: List[WorldPos],
+) -> List[WorldPos]:
+    """Walk the grid route with only safe straight hops."""
+    if is_segment_safe(grid, start[0], start[1], goal[0], goal[1]):
+        return [goal]
+
+    subpath = _subpath_between(grid_path, start, goal)
+    if not subpath:
+        return []
+
+    if math.hypot(subpath[0][0] - start[0], subpath[0][1] - start[1]) > 1e-4:
+        subpath = [start, *subpath]
+    if math.hypot(subpath[-1][0] - goal[0], subpath[-1][1] - goal[1]) > 1e-4:
+        subpath.append(goal)
+
+    bridged = string_pull_corners(grid, subpath)
+    if not bridged:
+        return []
+    if math.hypot(bridged[-1][0] - goal[0], bridged[-1][1] - goal[1]) > 1e-4:
+        if is_segment_safe(grid, bridged[-1][0], bridged[-1][1], goal[0], goal[1]):
+            bridged.append(goal)
+    return bridged[1:]
+
+
+def merge_collinear_corners(grid: np.ndarray, corners: List[WorldPos]) -> List[WorldPos]:
+    """Drop intermediate points that sit on the same safe straight line."""
+    if len(corners) < 3:
+        return list(corners)
+
+    merged: List[WorldPos] = [corners[0]]
+    i = 0
+    while i < len(corners) - 1:
+        start = merged[-1]
+        best_j = i + 1
+        for j in range(i + 2, len(corners)):
+            end = corners[j]
+            if not is_segment_safe(grid, start[0], start[1], end[0], end[1]):
+                break
+            ax, ay = start
+            bx, by = end
+            collinear = True
+            for k in range(i + 1, j):
+                cx, cy = corners[k]
+                area = abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax))
+                if area > 1e-3:
+                    collinear = False
+                    break
+            if collinear:
+                best_j = j
+        merged.append(corners[best_j])
+        i = best_j
+    return merged
+
+
+def ensure_safe_corner_chain(
+    grid: np.ndarray,
+    corners: List[WorldPos],
+    grid_path: List[WorldPos],
+) -> List[WorldPos]:
+    """Ensure every consecutive pair in the corner chain is collision-safe."""
+    if not corners:
+        return []
+
+    chain: List[WorldPos] = [corners[0]]
+    for target in corners[1:]:
+        last = chain[-1]
+        if is_segment_safe(grid, last[0], last[1], target[0], target[1]):
+            chain.append(target)
+            continue
+        for point in _bridge_unsafe_segment(grid, last, target, grid_path):
+            if math.hypot(point[0] - chain[-1][0], point[1] - chain[-1][1]) > 1e-4:
+                chain.append(point)
+    return merge_collinear_corners(grid, chain)
+
+
+def _complete_path_to_goal(
+    grid: np.ndarray, corners: List[WorldPos], goal: WorldPos
+) -> List[WorldPos]:
+    """Extend a partial corner chain to the goal with safe straight legs."""
+    path = list(corners)
+    if not path:
+        return path
+
+    for _ in range(16):
+        last = path[-1]
+        if math.hypot(last[0] - goal[0], last[1] - goal[1]) < 0.45:
+            if math.hypot(last[0] - goal[0], last[1] - goal[1]) > 1e-4:
+                path.append(goal)
+            break
+        if is_segment_safe(grid, last[0], last[1], goal[0], goal[1]):
+            path.append(goal)
+            break
+        bridge = _find_safe_bridge(grid, last, goal)
+        if bridge is None:
+            break
+        if math.hypot(bridge[0] - last[0], bridge[1] - last[1]) > 1e-4:
+            path.append(bridge)
+    return path
+
+
+def build_safe_corner_path(grid: np.ndarray, waypoints: List[WorldPos]) -> List[WorldPos]:
+    """Fewest straight collision-free legs — direct line when possible, else string-pull."""
+    if not waypoints:
+        return []
+
+    start, end = waypoints[0], waypoints[-1]
+    if is_segment_safe(grid, start[0], start[1], end[0], end[1]):
+        return [start, end]
+
+    refined = refine_safe_waypoints(grid, waypoints)
+    pulled = string_pull_corners(grid, refined)
+    if not pulled:
+        return []
+
+    if math.hypot(pulled[-1][0] - end[0], pulled[-1][1] - end[1]) > 0.45:
+        idx = _nearest_path_index(refined, pulled[-1])
+        tail = string_pull_corners(grid, refined[idx:])
+        if len(tail) > 1:
+            pulled.extend(tail[1:])
+        pulled = _complete_path_to_goal(grid, pulled, end)
+
+    return merge_collinear_corners(grid, pulled)
 
 
 def corner_playback_indices(corners: List[WorldPos], playback: List[WorldPos]) -> List[int]:
@@ -324,9 +549,8 @@ class PathFollower:
 
     def reset(self, start: WorldPos, goal: WorldPos) -> None:
         self.waypoints = plan_world_path(self.grid, start, goal)
-        dense = interpolate_path(self.grid, self.waypoints, step_size=0.12)
-        self.playback_path = ensure_axis_aligned_path(self.grid, dense)
         self.corner_path = build_safe_corner_path(self.grid, self.waypoints)
+        self.playback_path = interpolate_path(self.grid, self.corner_path, step_size=0.12)
         self._corner_playback_idx = corner_playback_indices(
             self.corner_path, self.playback_path
         )
@@ -377,8 +601,9 @@ class PathFollower:
         return result
 
     def _current_target(self, pos: np.ndarray, goal_pos: np.ndarray) -> np.ndarray:
-        while self.waypoint_index < len(self.waypoints):
-            target = np.array(self.waypoints[self.waypoint_index], dtype=np.float32)
+        targets = self.corner_path if self.corner_path else self.waypoints
+        while self.waypoint_index < len(targets):
+            target = np.array(targets[self.waypoint_index], dtype=np.float32)
             if float(np.linalg.norm(target - pos)) < 0.65:
                 self.waypoint_index += 1
             else:

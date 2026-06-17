@@ -46,7 +46,7 @@ def train(total_timesteps: int = 100_000, save_path: Path = DEFAULT_MODEL_PATH):
         tensorboard_log=str(save_path.parent / "tensorboard"),
     )
 
-    print(f"Training for {total_timesteps} timesteps...")
+    print(f"Training for {total_timesteps} timest   eps...")
     model.learn(total_timesteps=total_timesteps, callback=eval_callback)
     model.save(str(save_path))
     print(f"Model saved to {save_path}")
