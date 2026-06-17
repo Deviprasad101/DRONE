@@ -168,7 +168,7 @@ async def run_episode(ws: WebSocket):
     )
     total_reward = 0.0
     use_scripted = model is None
-    steps_per_tick = 2 if use_scripted else 1
+    steps_per_tick = 1 if use_scripted else 1
 
     state = build_state()
     await ws.send_json({"type": "state", "state": state, "reward": 0})
@@ -249,7 +249,7 @@ async def run_episode(ws: WebSocket):
             simulation_running = False
             return
 
-        await asyncio.sleep(0.033 if use_scripted else 0.06)
+        await asyncio.sleep(0.08 if use_scripted else 0.06)
 
 
 @app.websocket("/ws/simulation")
