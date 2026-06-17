@@ -550,7 +550,7 @@ class PathFollower:
     def reset(self, start: WorldPos, goal: WorldPos) -> None:
         self.waypoints = plan_world_path(self.grid, start, goal)
         self.corner_path = build_safe_corner_path(self.grid, self.waypoints)
-        self.playback_path = interpolate_path(self.grid, self.corner_path, step_size=0.12)
+        self.playback_path = interpolate_path(self.grid, self.corner_path, step_size=0.2)
         self._corner_playback_idx = corner_playback_indices(
             self.corner_path, self.playback_path
         )
@@ -585,20 +585,11 @@ class PathFollower:
 
     @property
     def traveled_path(self) -> List[List[float]]:
-        """Straight corner legs already traveled — wall-safe blue trail."""
-        if self.playback_index <= 0 or len(self.corner_path) < 2:
+        """Dense trail along playback points already reached."""
+        if self.playback_index <= 0 or not self.playback_path:
             return []
-        if self.playback_index >= len(self.playback_path):
-            return [[p[0], p[1]] for p in self.corner_path]
-
-        result: List[List[float]] = [[self.corner_path[0][0], self.corner_path[0][1]]]
-        for i in range(1, len(self.corner_path)):
-            if self._corner_playback_idx[i] > self.playback_index:
-                break
-            end = self.corner_path[i]
-            result.append([end[0], end[1]])
-
-        return result
+        end = min(self.playback_index + 1, len(self.playback_path))
+        return [[p[0], p[1]] for p in self.playback_path[:end]]
 
     def _current_target(self, pos: np.ndarray, goal_pos: np.ndarray) -> np.ndarray:
         targets = self.corner_path if self.corner_path else self.waypoints
@@ -656,5 +647,7 @@ class PathFollower:
 
     @property
     def planned_path(self) -> List[List[float]]:
-        """Straight corner legs of the full route — wall-safe green path."""
+        """Dense safe route for green path visualization."""
+        if self.playback_path:
+            return [[p[0], p[1]] for p in self.playback_path]
         return [[p[0], p[1]] for p in self.corner_path]

@@ -3,11 +3,20 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const WALL_HEIGHT = 2.5;
 const CRATE_HEIGHT = 0.8;
-const FLIGHT_PATH_Y = 1.15;
-const PLANNED_PATH_Y = 0.08;
+const DRONE_FLY_Y = 0;
+const FLIGHT_PATH_Y = 1.12;
+const PLANNED_PATH_Y = 0.22;
+const DRONE_LERP = 0.28;
 
 function pathToVectors(points, y) {
   return points.map((p) => new THREE.Vector3(p[0], y, p[1]));
+}
+
+function pathKey(points) {
+  if (!points || points.length === 0) return "";
+  const first = points[0];
+  const last = points[points.length - 1];
+  return `${points.length}:${first[0]},${first[1]}:${last[0]},${last[1]}`;
 }
 
 export class DroneScene {
@@ -53,6 +62,14 @@ export class DroneScene {
     this.pointer = new THREE.Vector2();
     this._pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this._pickTarget = new THREE.Vector3();
+
+    this.displayPos = new THREE.Vector3();
+    this.targetPos = new THREE.Vector3();
+    this.displayYaw = 0;
+    this.targetYaw = 0;
+    this._posInitialized = false;
+    this._plannedKey = "";
+    this._trailCount = 0;
 
     window.addEventListener("resize", () => this._onResize());
   }
@@ -271,6 +288,79 @@ export class DroneScene {
     return group;
   }
 
+  _setLinePoints(line, points) {
+    const array = new Float32Array(points.length * 3);
+    for (let i = 0; i < points.length; i++) {
+      array[i * 3] = points[i].x;
+      array[i * 3 + 1] = points[i].y;
+      array[i * 3 + 2] = points[i].z;
+    }
+    line.geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(array, 3)
+    );
+    line.geometry.computeBoundingSphere();
+  }
+
+  _ensurePlannedLine(points) {
+    const key = pathKey(points);
+    if (key === this._plannedKey && this.plannedLine) return;
+    this._plannedKey = key;
+
+    if (this.plannedLine) {
+      this.scene.remove(this.plannedLine);
+      this.plannedLine.geometry.dispose();
+      this.plannedLine.material.dispose();
+      this.plannedLine = null;
+    }
+
+    if (!points || points.length < 2) return;
+
+    const vectors = pathToVectors(points, PLANNED_PATH_Y);
+    const geometry = new THREE.BufferGeometry().setFromPoints(vectors);
+    this.plannedLine = new THREE.Line(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color: 0x22c55e,
+        transparent: true,
+        opacity: 0.85,
+      })
+    );
+    this.scene.add(this.plannedLine);
+  }
+
+  _ensureTrailLine(trail, position) {
+    if (!trail || trail.length < 2) return;
+
+    const points = trail.map((p) => [p[0], p[1]]);
+    if (position) {
+      const last = points[points.length - 1];
+      const dx = position[0] - last[0];
+      const dz = position[1] - last[1];
+      if (Math.hypot(dx, dz) > 0.01) {
+        points.push([position[0], position[1]]);
+      }
+    }
+
+    const vectors = pathToVectors(points, FLIGHT_PATH_Y);
+
+    if (!this.pathLine) {
+      const geometry = new THREE.BufferGeometry();
+      this.pathLine = new THREE.Line(
+        geometry,
+        new THREE.LineBasicMaterial({
+          color: 0x60a5fa,
+          transparent: true,
+          opacity: 0.95,
+        })
+      );
+      this.scene.add(this.pathLine);
+    }
+
+    this._setLinePoints(this.pathLine, vectors);
+    this._trailCount = vectors.length;
+  }
+
   _createMarker(color, emissive) {
     const group = new THREE.Group();
 
@@ -318,8 +408,18 @@ export class DroneScene {
     }
 
     if (state.position) {
-      this.drone.position.set(state.position[0], 0, state.position[1]);
-      this.drone.rotation.y = -(state.yaw || 0);
+      this.targetPos.set(state.position[0], DRONE_FLY_Y, state.position[1]);
+      this.targetYaw = -(state.yaw || 0);
+      if (!this._posInitialized) {
+        this.displayPos.copy(this.targetPos);
+        this.displayYaw = this.targetYaw;
+        this._posInitialized = true;
+      }
+    }
+
+    if (this.drone) {
+      this.drone.position.copy(this.displayPos);
+      this.drone.rotation.y = this.displayYaw;
     }
 
     if (state.start) {
@@ -338,45 +438,12 @@ export class DroneScene {
       this.goalMarker.position.set(state.goal[0], 0, state.goal[1]);
     }
 
-    if (state.path && state.path.length > 1) {
-      if (this.pathLine) {
-        this.scene.remove(this.pathLine);
-        this.pathLine.geometry.dispose();
-        this.pathLine.material.dispose();
-      }
-
-      const points = pathToVectors(state.path, FLIGHT_PATH_Y);
-      const geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-      this.pathLine = new THREE.Line(
-        geometry,
-        new THREE.LineBasicMaterial({
-          color: 0x60a5fa,
-          linewidth: 2,
-        })
-      );
-      this.scene.add(this.pathLine);
+    if (state.planned_path && state.planned_path.length > 1) {
+      this._ensurePlannedLine(state.planned_path);
     }
 
-    if (state.planned_path && state.planned_path.length > 1) {
-      if (this.plannedLine) {
-        this.scene.remove(this.plannedLine);
-        this.plannedLine.geometry.dispose();
-        this.plannedLine.material.dispose();
-      }
-
-      const planned = pathToVectors(state.planned_path, PLANNED_PATH_Y);
-      const geometry = new THREE.BufferGeometry().setFromPoints(planned);
-      this.plannedLine = new THREE.Line(
-        geometry,
-        new THREE.LineBasicMaterial({
-          color: 0x22c55e,
-          transparent: true,
-          opacity: 0.55,
-          linewidth: 2,
-        })
-      );
-      this.scene.add(this.plannedLine);
+    if (state.path && state.path.length > 1) {
+      this._ensureTrailLine(state.path, state.position);
     }
   }
 
@@ -387,6 +454,22 @@ export class DroneScene {
       this.pathLine.material.dispose();
       this.pathLine = null;
     }
+    this._trailCount = 0;
+  }
+
+  clearPlannedPath() {
+    if (this.plannedLine) {
+      this.scene.remove(this.plannedLine);
+      this.plannedLine.geometry.dispose();
+      this.plannedLine.material.dispose();
+      this.plannedLine = null;
+    }
+    this._plannedKey = "";
+  }
+
+  resetFlight() {
+    this.clearPath();
+    this._posInitialized = false;
   }
 
   render() {
@@ -396,6 +479,18 @@ export class DroneScene {
 
   animate() {
     requestAnimationFrame(() => this.animate());
+
+    if (this._posInitialized && this.drone) {
+      this.displayPos.lerp(this.targetPos, DRONE_LERP);
+      const yawDelta = this.targetYaw - this.displayYaw;
+      let wrapped = yawDelta;
+      while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+      while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+      this.displayYaw += wrapped * DRONE_LERP;
+      this.drone.position.copy(this.displayPos);
+      this.drone.rotation.y = this.displayYaw;
+    }
+
     this.render();
   }
 }

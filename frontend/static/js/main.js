@@ -86,7 +86,7 @@ async function onMapClick(type, x, y) {
     const data = await res.json();
 
     if (data.ok) {
-      scene.clearPath();
+      scene.resetFlight();
       applyState(data.state);
       setPickMode(null);
       if (data.warning) {
@@ -151,7 +151,7 @@ function connectWebSocket() {
     } else if (data.type === "reset") {
       totalReward = 0;
       hudReward.textContent = "0";
-      scene.clearPath();
+      scene.resetFlight();
       applyState(data.state);
       setStatus("Idle", "idle");
     }
@@ -185,16 +185,14 @@ btnStart.addEventListener("click", async () => {
   }
 
   if (!ws || ws.readyState !== WebSocket.OPEN) connectWebSocket();
-  setTimeout(() => {
-    setPickMode(null);
-    scene.clearPath();
-    ws.send(JSON.stringify({ action: "start" }));
-    setButtonsRunning(true);
-    btnStart.textContent = "Running...";
-    setStatus("Navigating", "running");
-    totalReward = 0;
-    hudReward.textContent = "0";
-  }, 300);
+  setPickMode(null);
+  scene.resetFlight();
+  ws.send(JSON.stringify({ action: "start" }));
+  setButtonsRunning(true);
+  btnStart.textContent = "Running...";
+  setStatus("Navigating", "running");
+  totalReward = 0;
+  hudReward.textContent = "0";
 });
 
 btnReset.addEventListener("click", () => {

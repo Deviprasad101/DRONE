@@ -224,6 +224,10 @@ class IndoorDroneEnv(gym.Env):
         self.pos = np.array([x, y], dtype=np.float32)
         if yaw is not None:
             self.yaw = yaw
+        if self.path_history:
+            last = self.path_history[-1]
+            if abs(last[0] - x) < 1e-3 and abs(last[1] - y) < 1e-3:
+                return True
         self.path_history.append(self.pos.tolist())
         return True
 

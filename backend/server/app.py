@@ -69,7 +69,8 @@ async def index():
 def build_state() -> dict:
     state = env.get_state_dict()
     state["planned_path"] = path_follower.planned_path
-    if path_follower.playback_index > 0:
+    # Blue trail: actual positions from simulation (path_history), not corner shortcuts.
+    if len(state.get("path", [])) < 2 and path_follower.playback_index > 0:
         state["path"] = path_follower.traveled_path
     state["path_valid"] = path_exists(
         env.map_layout,
@@ -167,31 +168,37 @@ async def run_episode(ws: WebSocket):
     )
     total_reward = 0.0
     use_scripted = model is None
+    steps_per_tick = 2 if use_scripted else 1
 
     state = build_state()
     await ws.send_json({"type": "state", "state": state, "reward": 0})
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.15)
 
+    pose = None
     while simulation_running:
         if use_scripted:
-            pose = path_follower.current_playback_pose()
-            if pose is None:
-                env.set_pose(env.goal_pos[0], env.goal_pos[1])
-                env.steps += 1
-                success = True
-                reason = "Goal reached!"
-            else:
-                (x, y), yaw = pose
-                if not env.set_pose(x, y, yaw):
-                    continue
-                path_follower.advance_playback()
-                env.steps += 1
-                dist = float(np.linalg.norm(env.goal_pos - env.pos))
-                success = dist < 0.5
-                if success:
+            success = False
+            reason = ""
+            for _ in range(steps_per_tick):
+                pose = path_follower.current_playback_pose()
+                if pose is None:
+                    env.set_pose(float(env.goal_pos[0]), float(env.goal_pos[1]))
+                    env.steps += 1
+                    success = True
                     reason = "Goal reached!"
-                else:
-                    reason = ""
+                    break
+
+                (x, y), yaw = pose
+                if env.set_pose(x, y, yaw):
+                    env.steps += 1
+                path_follower.advance_playback()
+
+                dist = float(np.linalg.norm(env.goal_pos - env.pos))
+                if dist < 0.5:
+                    success = True
+                    reason = "Goal reached!"
+                    break
+
             reward = 0.1
             terminated = success
             truncated = False
@@ -210,7 +217,7 @@ async def run_episode(ws: WebSocket):
             {"type": "state", "state": state, "reward": float(reward)}
         )
 
-        if use_scripted and (pose is None or success):
+        if use_scripted and success:
             await ws.send_json(
                 {
                     "type": "done",
@@ -242,7 +249,7 @@ async def run_episode(ws: WebSocket):
             simulation_running = False
             return
 
-        await asyncio.sleep(0.05 if use_scripted else 0.06)
+        await asyncio.sleep(0.033 if use_scripted else 0.06)
 
 
 @app.websocket("/ws/simulation")
