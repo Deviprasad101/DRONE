@@ -1,4 +1,4 @@
-models/
+backend/models/
 *.zip
 __pycache__/
 *.pyc

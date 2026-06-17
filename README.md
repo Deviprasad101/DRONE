@@ -8,34 +8,37 @@ Autonomous indoor drone navigation using **Reinforcement Learning**, with a 3D T
 
 ```
 DRONE/
-├── env/                    # Gymnasium RL environment
-│   └── indoor_drone_env.py
-├── agent/                  # A* path planning + playback (not the RL agent)
-│   └── navigator.py
-├── server/                 # FastAPI + WebSocket
-│   └── app.py
-├── web/                    # Three.js 3D UI
+├── frontend/                    # Browser UI (Three.js)
 │   ├── index.html
 │   └── static/
 │       ├── css/style.css
-│       └── js/
-│           ├── main.js     # UI controls & WebSocket
-│           └── scene.js    # Three.js 3D scene
-├── train.py                # PPO training script
-├── run_demo.py             # Start demo server
-├── requirements.txt
-├── README.md
-└── assets/                 # Screenshots & media
+│       ├── js/
+│       │   ├── main.js          # UI controls & WebSocket
+│       │   └── scene.js         # Three.js 3D scene
+│       └── favicon.svg
+├── backend/                     # Python server + simulation + AI
+│   ├── server/
+│   │   └── app.py               # FastAPI, REST, WebSocket
+│   ├── env/
+│   │   └── indoor_drone_env.py  # RL world (map, drone, lidar)
+│   ├── agent/
+│   │   └── navigator.py         # A* path planning + demo flight
+│   ├── models/                  # Trained PPO model (after train)
+│   ├── train.py                 # Train RL agent
+│   ├── run_demo.py              # Start server
+│   └── requirements.txt
+├── assets/                      # Screenshots & media
+└── README.md
 ```
 
 | Folder / file | Role |
 |---------------|------|
-| `env/` | Gymnasium environment: map, lidar, rewards, drone physics |
-| `agent/` | A* planner, path safety checks, scripted demo playback |
-| `server/` | REST API, WebSocket simulation loop, model loading |
-| `web/` | Browser UI: point picking, HUD, Three.js visualization |
-| `train.py` | Train PPO agent; saves to `models/` (created on first run) |
-| `run_demo.py` | Entry point — starts server at `http://localhost:8000` |
+| `frontend/` | Browser UI: point picking, HUD, Three.js visualization |
+| `backend/server/` | REST API, WebSocket simulation loop, model loading |
+| `backend/env/` | Gymnasium environment: map, lidar, rewards, drone physics |
+| `backend/agent/` | A* planner, path safety checks, scripted demo playback |
+| `backend/train.py` | Train PPO agent; saves to `backend/models/` |
+| `backend/run_demo.py` | Entry point — starts server at `http://localhost:8000` |
 
 ## Features
 
@@ -51,7 +54,7 @@ DRONE/
 ### 1. Install Dependencies
 
 ```bash
-cd "d:\TIH PROJECTS\DRONE"
+cd backend
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
@@ -60,6 +63,7 @@ pip install -r requirements.txt
 ### 2. Run the Demo
 
 ```bash
+cd backend
 python run_demo.py
 ```
 
@@ -68,10 +72,11 @@ Open **http://localhost:8000** in your browser.
 ### 3. Train the RL Agent (Optional)
 
 ```bash
+cd backend
 python train.py
 ```
 
-After training, the model is saved to `models/ppo_indoor_drone.zip` and loaded automatically by the server.
+After training, the model is saved to `backend/models/ppo_indoor_drone.zip` and loaded automatically by the server.
 
 ## RL Environment Details
 

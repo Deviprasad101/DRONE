@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from env.indoor_drone_env import IndoorDroneEnv
 from agent.navigator import PathFollower, path_exists, snap_to_walkable
 
-WEB_DIR = Path(__file__).parent.parent / "web"
+WEB_DIR = Path(__file__).parent.parent.parent / "frontend"
 MODELS_DIR = Path(__file__).parent.parent / "models"
 DEFAULT_MODEL = MODELS_DIR / "ppo_indoor_drone.zip"
 
