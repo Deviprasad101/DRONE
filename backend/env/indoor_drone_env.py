@@ -15,40 +15,11 @@ import numpy as np
 from gymnasium import spaces
 
 from env.furniture import merge_furniture_obstacles
+from env.map_layout import DEFAULT_GOAL, DEFAULT_START, MAP_LAYOUT
 
-# Map layout: 0=free, 1=wall, 2=crate obstacle
-# 20x20 grid representing an indoor floor plan
-MAP_LAYOUT = np.array(
-    [
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 1],
-        [1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 2, 0, 0, 1, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 1],
-        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-        [1, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    ],
-    dtype=np.int8,
-)
-
-DEFAULT_START = (4.0, 4.0)
-DEFAULT_GOAL = (17.0, 10.0)
 CELL_SIZE = 1.0
 DRONE_RADIUS = 0.25
-MAX_STEPS = 800
+MAX_STEPS = 1200
 NUM_LIDAR_RAYS = 16
 LIDAR_RANGE = 5.0
 
@@ -211,8 +182,8 @@ class IndoorDroneEnv(gym.Env):
         info["reached_goal"] = reached_goal
         return self._get_obs(), reward, terminated, truncated, info
 
-    def _get_info(self) -> dict[str, Any]:
-        return {
+    def _get_info(self, include_map: bool = True) -> dict[str, Any]:
+        info: dict[str, Any] = {
             "position": self.pos.tolist(),
             "goal": self.goal_pos.tolist(),
             "start": self.start_pos.tolist(),
@@ -220,9 +191,11 @@ class IndoorDroneEnv(gym.Env):
             "path": self.path_history.copy(),
             "steps": self.steps,
             "dist_to_goal": float(np.linalg.norm(self.goal_pos - self.pos)),
-            "map_layout": self.base_map_layout.tolist(),
             "grid_size": [self.grid_w, self.grid_h],
         }
+        if include_map:
+            info["map_layout"] = self.base_map_layout.tolist()
+        return info
 
     def set_pose(self, x: float, y: float, yaw: float | None = None) -> bool:
         """Set drone pose for scripted demo playback."""
@@ -238,10 +211,12 @@ class IndoorDroneEnv(gym.Env):
         self.path_history.append(self.pos.tolist())
         return True
 
-    def get_state_dict(self, include_lidar: bool = True) -> dict[str, Any]:
+    def get_state_dict(
+        self, include_lidar: bool = True, include_map: bool = True
+    ) -> dict[str, Any]:
         """Full state for web visualization."""
         state = {
-            **self._get_info(),
+            **self._get_info(include_map=include_map),
         }
         if include_lidar:
             state["lidar"] = self._cast_lidar().tolist()

@@ -69,15 +69,18 @@ async def index():
     )
 
 
-def build_state() -> dict:
-    state = env.get_state_dict(include_lidar=False)
+def build_state(include_map: bool = True) -> dict:
+    state = env.get_state_dict(include_lidar=False, include_map=include_map)
     state["planned_path"] = path_follower.planned_path
-    state["planned_legs"] = path_follower.planned_legs
+    # Prefer dense safe path for rendering; straight legs cut through furniture visually.
+    state["planned_legs"] = (
+        [] if len(path_follower.playback_path) > 1 else path_follower.planned_legs
+    )
     if path_follower.playback_index > 0:
         state["path"] = path_follower.traveled_path
     elif len(state.get("path", [])) > 1:
         state["path"] = sanitize_display_path(env.map_layout, state["path"])
-    state["path_valid"] = path_exists(
+    state["path_valid"] = bool(path_follower.waypoints) or path_exists(
         env.map_layout,
         tuple(env.start_pos.tolist()),
         tuple(env.goal_pos.tolist()),
@@ -105,12 +108,11 @@ def apply_point(point_type: str, x: float, y: float) -> dict:
 
     env.set_mission(start, goal)
     env.reset()
-    path_follower.reset(start, goal)
-    has_path = path_exists(env.map_layout, start, goal)
+    has_path = path_follower.preview_plan(start, goal)
 
     return {
         "ok": True,
-        "state": build_state(),
+        "state": build_state(include_map=False),
         "point_type": point_type,
         "position": list(snapped),
         "path_valid": has_path,

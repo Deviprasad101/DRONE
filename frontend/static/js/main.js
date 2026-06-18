@@ -1,4 +1,4 @@
-import { DroneScene } from "./scene.js?v=6";
+import { DroneScene } from "./scene.js?v=11";
 
 const canvas = document.getElementById("canvas3d");
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -23,6 +23,9 @@ const btnPickGoal = document.getElementById("btn-pick-goal");
 let ws = null;
 let totalReward = 0;
 let pickMode = null;
+let pickSaving = false;
+let lastStart = null;
+let lastGoal = null;
 
 function setStatus(text, cls) {
   hudStatus.textContent = text;
@@ -37,9 +40,11 @@ function setButtonsRunning(running) {
 
 function updateReadout(state) {
   if (state?.start) {
+    lastStart = state.start;
     readoutStart.textContent = `${state.start[0].toFixed(0)}, ${state.start[1].toFixed(0)}`;
   }
   if (state?.goal) {
+    lastGoal = state.goal;
     readoutGoal.textContent = `${state.goal[0].toFixed(0)}, ${state.goal[1].toFixed(0)}`;
   }
 }
@@ -58,7 +63,7 @@ function setPickMode(mode) {
     pickOverlay.classList.remove("hidden");
     pickOverlay.setAttribute("aria-hidden", "false");
     pickOverlayText.textContent = "Click the open floor to place START (blue)";
-    pickHint.textContent = "Click the 3D floor inside the blue border...";
+    pickHint.textContent = "Click directly on the wood floor in the 3D view...";
     pickHint.classList.add("active");
     scene.setPickMode("start", onMapClick);
   } else if (mode === "goal") {
@@ -66,7 +71,7 @@ function setPickMode(mode) {
     pickOverlay.classList.remove("hidden");
     pickOverlay.setAttribute("aria-hidden", "false");
     pickOverlayText.textContent = "Click the open floor to place GOAL (green)";
-    pickHint.textContent = "Click the 3D floor inside the green border...";
+    pickHint.textContent = "Click directly on the wood floor in the 3D view...";
     pickHint.classList.add("active");
     scene.setPickMode("goal", onMapClick);
   } else {
@@ -77,6 +82,17 @@ function setPickMode(mode) {
 }
 
 async function onMapClick(type, x, y) {
+  if (pickSaving) return;
+  pickSaving = true;
+
+  scene.previewMarker(type, x, y);
+  if (type === "start") {
+    readoutStart.textContent = `${x.toFixed(0)}, ${y.toFixed(0)}`;
+  } else {
+    readoutGoal.textContent = `${x.toFixed(0)}, ${y.toFixed(0)}`;
+  }
+  setStatus("Saving point...", "running");
+
   try {
     const res = await fetch("/api/set-point", {
       method: "POST",
@@ -95,10 +111,30 @@ async function onMapClick(type, x, y) {
         setStatus("Route Ready", "idle");
       }
     } else {
+      if (lastStart) scene.previewMarker("start", lastStart[0], lastStart[1]);
+      if (lastGoal) scene.previewMarker("goal", lastGoal[0], lastGoal[1]);
+      if (lastStart || lastGoal) {
+        readoutStart.textContent = lastStart
+          ? `${lastStart[0].toFixed(0)}, ${lastStart[1].toFixed(0)}`
+          : readoutStart.textContent;
+        readoutGoal.textContent = lastGoal
+          ? `${lastGoal[0].toFixed(0)}, ${lastGoal[1].toFixed(0)}`
+          : readoutGoal.textContent;
+      }
       setStatus(data.error || "Could not set point", "failed");
     }
   } catch (e) {
     setStatus("Server unavailable", "failed");
+  } finally {
+    pickSaving = false;
+  }
+}
+
+function handleCanvasPick(e) {
+  if (!pickMode || pickSaving) return;
+  const picked = scene.pickAtScreen(e.clientX, e.clientY);
+  if (!picked) {
+    setStatus("Click open floor (avoid walls)", "failed");
   }
 }
 
@@ -169,15 +205,7 @@ function connectWebSocket() {
   ws.onerror = () => setStatus("Connection error", "failed");
 }
 
-pickOverlay.addEventListener("click", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  if (!pickMode) return;
-  const picked = scene.pickAtScreen(e.clientX, e.clientY);
-  if (!picked) {
-    setStatus("Click open floor", "failed");
-  }
-});
+canvas.addEventListener("click", handleCanvasPick);
 
 btnStart.addEventListener("click", async () => {
   try {

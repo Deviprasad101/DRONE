@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RL Based Indoor Drone Navigation</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=6" />
+  <link rel="stylesheet" href="/static/css/style.css?v=10" />
 </head>
 <body>
   <div id="app">
@@ -22,7 +22,7 @@
     <main class="main">
       <div class="simulation-panel">
         <div class="canvas-wrap" id="canvas-wrap">
-          <div class="panel-badge">FURNISHED APARTMENT — 3D VIEW</div>
+          <div class="panel-badge">LARGE APARTMENT — 60×60 FLOOR</div>
           <canvas id="canvas3d"></canvas>
           <div id="pick-overlay" class="pick-overlay hidden" aria-hidden="true">
             <span id="pick-overlay-text">Click the floor to place point</span>
@@ -60,8 +60,8 @@
             <button id="btn-pick-goal" class="btn pick goal-pick">Set Goal (Green)</button>
           </div>
           <div class="point-readout">
-            <div><span class="label">Start</span> <span id="readout-start">4, 4</span></div>
-            <div><span class="label">Goal</span> <span id="readout-goal">17, 10</span></div>
+            <div><span class="label">Start</span> <span id="readout-start">18, 18</span></div>
+            <div><span class="label">Goal</span> <span id="readout-goal">44, 38</span></div>
           </div>
           <p id="pick-hint" class="pick-hint">Select start and goal, then press Start Demo.</p>
         </section>
@@ -88,6 +88,6 @@
       }
     }
   </script>
-  <script type="module" src="/static/js/main.js?v=6"></script>
+  <script type="module" src="/static/js/main.js?v=11"></script>
 </body>
 </html>

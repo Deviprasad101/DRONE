@@ -95,8 +95,12 @@ def _point_clear(grid: np.ndarray, x: float, y: float) -> bool:
 def is_safe_for_drone(grid: np.ndarray, x: float, y: float, radius: float = DRONE_RADIUS) -> bool:
     """True if a drone with the given radius does not overlap walls/crates."""
     h, w = grid.shape
-    for gi in range(h):
-        for gj in range(w):
+    min_col = int(math.floor(x - radius))
+    max_col = int(math.floor(x + radius))
+    min_row = int(math.floor(y - radius))
+    max_row = int(math.floor(y + radius))
+    for gi in range(max(0, min_row), min(h, max_row + 2)):
+        for gj in range(max(0, min_col), min(w, max_col + 2)):
             if grid[gi, gj] == 0:
                 continue
             cell_x, cell_y = float(gj), float(gi)
@@ -647,14 +651,34 @@ class PathFollower:
         self.playback_index = 0
 
     def reset(self, start: WorldPos, goal: WorldPos) -> None:
-        self.waypoints = plan_world_path(self.grid, start, goal)
-        self.corner_path = build_safe_corner_path(self.grid, self.waypoints)
+        self.preview_plan(start, goal)
+        if not self.waypoints:
+            return
         self.playback_path = interpolate_path(self.grid, self.corner_path, step_size=0.2)
         self._corner_playback_idx = corner_playback_indices(
             self.corner_path, self.playback_path
         )
         self.waypoint_index = 0
         self.playback_index = 0
+
+    def preview_plan(self, start: WorldPos, goal: WorldPos) -> bool:
+        """Lightweight route preview for marker placement (with safe display path)."""
+        self.waypoints = plan_world_path(self.grid, start, goal)
+        if not self.waypoints:
+            self.corner_path = []
+            self.playback_path = []
+            self._corner_playback_idx = []
+            self.waypoint_index = 0
+            self.playback_index = 0
+            return False
+        self.corner_path = build_safe_corner_path(self.grid, self.waypoints)
+        self.playback_path = interpolate_path(
+            self.grid, self.corner_path, step_size=0.18
+        )
+        self._corner_playback_idx = []
+        self.waypoint_index = 0
+        self.playback_index = 0
+        return True
 
     def advance_playback(self) -> None:
         self.playback_index += 1

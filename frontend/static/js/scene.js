@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { buildApartmentInterior } from "./interior.js?v=6";
+import { buildApartmentInterior } from "./interior.js?v=10";
 
-const SCENE_VERSION = 6;
+const SCENE_VERSION = 11;
 const DRONE_FLY_Y = 0;
 const FLIGHT_PATH_Y = 1.55;
 const PLANNED_PATH_Y = 1.4;
 const DRONE_LERP = 0.28;
+const DEFAULT_MAP_SIZE = 60;
 
 function pathToVectors(points, y) {
   return points.map((p) => new THREE.Vector3(p[0], y, p[1]));
@@ -24,16 +25,17 @@ export class DroneScene {
     this.canvas = canvas;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xe8dfd0);
-    this.scene.fog = new THREE.Fog(0xe8dfd0, 35, 70);
+    this.scene.fog = new THREE.Fog(0xe8dfd0, 60, 140);
+
+    this._mapW = DEFAULT_MAP_SIZE;
+    this._mapH = DEFAULT_MAP_SIZE;
 
     this.camera = new THREE.PerspectiveCamera(
-      42,
+      52,
       canvas.clientWidth / canvas.clientHeight,
       0.1,
-      120
+      250
     );
-    this.camera.position.set(26, 22, 26);
-    this.camera.lookAt(9.5, 0, 9.5);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
@@ -44,10 +46,10 @@ export class DroneScene {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
-    this.controls.maxPolarAngle = Math.PI / 2.15;
-    this.controls.minDistance = 12;
-    this.controls.maxDistance = 45;
-    this.controls.target.set(9.5, 0, 9.5);
+    this.controls.maxPolarAngle = Math.PI / 2.12;
+    this.controls.minDistance = 8;
+
+    this._fitCameraToMap();
 
     this._setupLights();
     this.drone = null;
@@ -64,6 +66,7 @@ export class DroneScene {
     this.pointer = new THREE.Vector2();
     this._pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this._pickTarget = new THREE.Vector3();
+    this._mapLayout = null;
 
     this.displayPos = new THREE.Vector3();
     this.targetPos = new THREE.Vector3();
@@ -83,6 +86,52 @@ export class DroneScene {
     this.pickMode = mode;
     this.onPick = callback;
     this.controls.enabled = !mode;
+    this.canvas.style.cursor = mode ? "crosshair" : "";
+  }
+
+  _snapPickToWalkable(x, z) {
+    if (!this._mapLayout) {
+      return { x: Math.round(x), z: Math.round(z) };
+    }
+    const row = Math.round(z);
+    const col = Math.round(x);
+    const rows = this._mapLayout.length;
+    const cols = this._mapLayout[0]?.length ?? 0;
+    const walkable = (r, c) =>
+      r >= 0 && c >= 0 && r < rows && c < cols && this._mapLayout[r][c] === 0;
+
+    if (walkable(row, col)) {
+      return { x: col, z: row };
+    }
+
+    for (let radius = 1; radius < 8; radius++) {
+      for (let dr = -radius; dr <= radius; dr++) {
+        for (let dc = -radius; dc <= radius; dc++) {
+          const nr = row + dr;
+          const nc = col + dc;
+          if (walkable(nr, nc)) {
+            return { x: nc, z: nr };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  previewMarker(type, x, z) {
+    if (type === "start") {
+      if (!this.startMarker) {
+        this.startMarker = this._createMarker(0x3b82f6, 0x3b82f6);
+        this.scene.add(this.startMarker);
+      }
+      this.startMarker.position.set(x, 0, z);
+    } else if (type === "goal") {
+      if (!this.goalMarker) {
+        this.goalMarker = this._createMarker(0x22c55e, 0x22c55e);
+        this.scene.add(this.goalMarker);
+      }
+      this.goalMarker.position.set(x, 0, z);
+    }
   }
 
   pickAtScreen(clientX, clientY) {
@@ -102,24 +151,43 @@ export class DroneScene {
     this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
-    if (this.floorMesh) {
-      const hits = this.raycaster.intersectObject(this.floorMesh);
-      if (hits.length > 0) {
-        const p = hits[0].point;
-        this.onPick(this.pickMode, p.x, p.z);
-        return true;
+    let worldX = null;
+    let worldZ = null;
+
+    const hits = this.raycaster.intersectObjects(this.mapGroup.children, true);
+    for (const hit of hits) {
+      if (hit.point.y > 0.35) continue;
+      worldX = hit.point.x;
+      worldZ = hit.point.z;
+      break;
+    }
+
+    if (worldX === null && this.floorMesh) {
+      const floorHits = this.raycaster.intersectObject(this.floorMesh, false);
+      if (floorHits.length > 0) {
+        worldX = floorHits[0].point.x;
+        worldZ = floorHits[0].point.z;
       }
     }
 
-    if (this.raycaster.ray.intersectPlane(this._pickPlane, this._pickTarget)) {
-      const x = this._pickTarget.x;
-      const z = this._pickTarget.z;
-      if (x >= 0 && x <= 19 && z >= 0 && z <= 19) {
-        this.onPick(this.pickMode, x, z);
-        return true;
-      }
+    if (worldX === null && this.raycaster.ray.intersectPlane(this._pickPlane, this._pickTarget)) {
+      worldX = this._pickTarget.x;
+      worldZ = this._pickTarget.z;
     }
-    return false;
+
+    if (worldX === null) return false;
+
+    const maxX = this._mapW - 1;
+    const maxZ = this._mapH - 1;
+    if (worldX < 0 || worldX > maxX || worldZ < 0 || worldZ > maxZ) {
+      return false;
+    }
+
+    const snapped = this._snapPickToWalkable(worldX, worldZ);
+    if (!snapped) return false;
+
+    this.onPick(this.pickMode, snapped.x, snapped.z);
+    return true;
   }
 
   _setupLights() {
@@ -131,11 +199,11 @@ export class DroneScene {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 55;
-    sun.shadow.camera.left = -22;
-    sun.shadow.camera.right = 22;
-    sun.shadow.camera.top = 22;
-    sun.shadow.camera.bottom = -22;
+    sun.shadow.camera.far = 100;
+    sun.shadow.camera.left = -40;
+    sun.shadow.camera.right = 40;
+    sun.shadow.camera.top = 40;
+    sun.shadow.camera.bottom = -40;
     sun.shadow.bias = -0.0005;
     this.scene.add(sun);
 
@@ -153,6 +221,7 @@ export class DroneScene {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this._fitCameraToMap();
   }
 
   buildMap(mapLayout) {
@@ -240,7 +309,13 @@ export class DroneScene {
     }
 
     const segmentPoints = [];
-    if (legs && legs.length > 0) {
+    const useDensePath = points && points.length > 2;
+    if (useDensePath) {
+      const vectors = pathToVectors(points, PLANNED_PATH_Y);
+      for (let i = 0; i < vectors.length - 1; i++) {
+        segmentPoints.push(vectors[i], vectors[i + 1]);
+      }
+    } else if (legs && legs.length > 0) {
       for (const leg of legs) {
         if (!leg || leg.length < 2) continue;
         const a = pathToVectors([leg[0]], PLANNED_PATH_Y)[0];
@@ -338,6 +413,19 @@ export class DroneScene {
     return group;
   }
 
+  _fitCameraToMap() {
+    const cx = this._mapW / 2 - 0.5;
+    const cz = this._mapH / 2 - 0.5;
+    const span = Math.max(this._mapW, this._mapH);
+    const fovRad = (this.camera.fov * Math.PI) / 180;
+    const dist = (span * 0.52) / Math.tan(fovRad / 2);
+    this.controls.target.set(cx, 0, cz);
+    this.camera.position.set(cx + dist * 0.5, dist * 0.72, cz + dist * 0.5);
+    this.camera.lookAt(cx, 0, cz);
+    this.controls.maxDistance = dist * 1.8;
+    this.controls.update();
+  }
+
   _scheduleBuildMap(mapLayout) {
     if (this._buildScheduled) {
       this._pendingLayout = mapLayout;
@@ -359,12 +447,25 @@ export class DroneScene {
   updateState(state) {
     if (!state) return;
 
+    if (state.grid_size) {
+      this._mapW = state.grid_size[0];
+      this._mapH = state.grid_size[1];
+    } else if (state.map_layout) {
+      this._mapH = state.map_layout.length;
+      this._mapW = state.map_layout[0]?.length ?? DEFAULT_MAP_SIZE;
+    }
+
     if (
       state.map_layout &&
       (this.mapGroup.children.length === 0 || this._builtSceneVersion !== SCENE_VERSION)
     ) {
       this._builtSceneVersion = SCENE_VERSION;
       this._scheduleBuildMap(state.map_layout);
+      this._fitCameraToMap();
+    }
+
+    if (state.map_layout) {
+      this._mapLayout = state.map_layout;
     }
 
     if (!this.drone) {
