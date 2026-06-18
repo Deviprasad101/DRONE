@@ -63,11 +63,14 @@ async def startup():
 
 @app.get("/")
 async def index():
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(
+        WEB_DIR / "index.html",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 def build_state() -> dict:
-    state = env.get_state_dict()
+    state = env.get_state_dict(include_lidar=False)
     state["planned_path"] = path_follower.planned_path
     state["planned_legs"] = path_follower.planned_legs
     if path_follower.playback_index > 0:

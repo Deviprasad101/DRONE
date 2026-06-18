@@ -14,6 +14,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from env.furniture import merge_furniture_obstacles
+
 # Map layout: 0=free, 1=wall, 2=crate obstacle
 # 20x20 grid representing an indoor floor plan
 MAP_LAYOUT = np.array(
@@ -42,8 +44,8 @@ MAP_LAYOUT = np.array(
     dtype=np.int8,
 )
 
-DEFAULT_START = (2.0, 2.0)
-DEFAULT_GOAL = (17.0, 17.0)
+DEFAULT_START = (4.0, 4.0)
+DEFAULT_GOAL = (17.0, 10.0)
 CELL_SIZE = 1.0
 DRONE_RADIUS = 0.25
 MAX_STEPS = 800
@@ -65,7 +67,8 @@ class IndoorDroneEnv(gym.Env):
     ):
         super().__init__()
         self.render_mode = render_mode
-        self.map_layout = MAP_LAYOUT.copy()
+        self.base_map_layout = MAP_LAYOUT.copy()
+        self.map_layout = merge_furniture_obstacles(self.base_map_layout)
         self.grid_h, self.grid_w = self.map_layout.shape
         self.start_pos = np.array(start_pos or DEFAULT_START, dtype=np.float32)
         self.goal_pos = np.array(goal_pos or DEFAULT_GOAL, dtype=np.float32)
@@ -89,6 +92,25 @@ class IndoorDroneEnv(gym.Env):
         self.path_history: list[list[float]] = []
         self._prev_dist_to_goal = 0.0
 
+    def _is_collision(self, x: float, y: float) -> bool:
+        min_col = int(math.floor(x - DRONE_RADIUS))
+        max_col = int(math.floor(x + DRONE_RADIUS))
+        min_row = int(math.floor(y - DRONE_RADIUS))
+        max_row = int(math.floor(y + DRONE_RADIUS))
+        for gi in range(max(0, min_row), min(self.grid_h, max_row + 2)):
+            for gj in range(max(0, min_col), min(self.grid_w, max_col + 2)):
+                if self.map_layout[gi, gj] == 0:
+                    continue
+                cell_x, cell_y = gj, gi
+                if (
+                    x + DRONE_RADIUS > cell_x
+                    and x - DRONE_RADIUS < cell_x + CELL_SIZE
+                    and y + DRONE_RADIUS > cell_y
+                    and y - DRONE_RADIUS < cell_y + CELL_SIZE
+                ):
+                    return True
+        return False
+
     def _world_to_grid(self, x: float, y: float) -> tuple[int, int]:
         return int(round(y)), int(round(x))
 
@@ -101,21 +123,6 @@ class IndoorDroneEnv(gym.Env):
     def set_mission(self, start: tuple[float, float], goal: tuple[float, float]) -> None:
         self.start_pos = np.array(start, dtype=np.float32)
         self.goal_pos = np.array(goal, dtype=np.float32)
-
-    def _is_collision(self, x: float, y: float) -> bool:
-        for gi in range(self.grid_h):
-            for gj in range(self.grid_w):
-                if self.map_layout[gi, gj] == 0:
-                    continue
-                cell_x, cell_y = gj, gi
-                if (
-                    x + DRONE_RADIUS > cell_x
-                    and x - DRONE_RADIUS < cell_x + CELL_SIZE
-                    and y + DRONE_RADIUS > cell_y
-                    and y - DRONE_RADIUS < cell_y + CELL_SIZE
-                ):
-                    return True
-        return False
 
     def _cast_lidar(self) -> np.ndarray:
         distances = np.zeros(NUM_LIDAR_RAYS, dtype=np.float32)
@@ -213,7 +220,7 @@ class IndoorDroneEnv(gym.Env):
             "path": self.path_history.copy(),
             "steps": self.steps,
             "dist_to_goal": float(np.linalg.norm(self.goal_pos - self.pos)),
-            "map_layout": self.map_layout.tolist(),
+            "map_layout": self.base_map_layout.tolist(),
             "grid_size": [self.grid_w, self.grid_h],
         }
 
@@ -231,9 +238,11 @@ class IndoorDroneEnv(gym.Env):
         self.path_history.append(self.pos.tolist())
         return True
 
-    def get_state_dict(self) -> dict[str, Any]:
+    def get_state_dict(self, include_lidar: bool = True) -> dict[str, Any]:
         """Full state for web visualization."""
-        return {
+        state = {
             **self._get_info(),
-            "lidar": self._cast_lidar().tolist(),
         }
+        if include_lidar:
+            state["lidar"] = self._cast_lidar().tolist()
+        return state

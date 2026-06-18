@@ -1,4 +1,4 @@
-import { DroneScene } from "./scene.js";
+import { DroneScene } from "./scene.js?v=6";
 
 const canvas = document.getElementById("canvas3d");
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -111,13 +111,21 @@ function applyState(state) {
 
 async function fetchInitialState() {
   try {
-    const res = await fetch("/api/state");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch("/api/state", { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const state = await res.json();
     applyState(state);
+    setStatus("Idle", "idle");
   } catch (e) {
-    setStatus("Load failed", "failed");
+    setStatus("Server not responding — restart run_demo.py", "failed");
+    console.error("Failed to load state:", e);
   }
 }
+
+fetchInitialState().then(() => connectWebSocket());
 
 function connectWebSocket() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
@@ -216,6 +224,3 @@ btnPickGoal.addEventListener("click", (e) => {
   e.stopPropagation();
   setPickMode(pickMode === "goal" ? null : "goal");
 });
-
-fetchInitialState();
-connectWebSocket();

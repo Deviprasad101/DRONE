@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { buildApartmentInterior } from "./interior.js?v=6";
 
-const WALL_HEIGHT = 2.5;
-const CRATE_HEIGHT = 0.8;
+const SCENE_VERSION = 6;
 const DRONE_FLY_Y = 0;
-const FLIGHT_PATH_Y = 1.12;
-const PLANNED_PATH_Y = 0.22;
+const FLIGHT_PATH_Y = 1.55;
+const PLANNED_PATH_Y = 1.4;
 const DRONE_LERP = 0.28;
 
 function pathToVectors(points, y) {
@@ -23,17 +23,17 @@ export class DroneScene {
   constructor(canvas) {
     this.canvas = canvas;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a2332);
-    this.scene.fog = new THREE.Fog(0x1a2332, 30, 60);
+    this.scene.background = new THREE.Color(0xe8dfd0);
+    this.scene.fog = new THREE.Fog(0xe8dfd0, 35, 70);
 
     this.camera = new THREE.PerspectiveCamera(
-      50,
+      42,
       canvas.clientWidth / canvas.clientHeight,
       0.1,
-      100
+      120
     );
-    this.camera.position.set(12, 18, 22);
-    this.camera.lookAt(10, 0, 10);
+    this.camera.position.set(26, 22, 26);
+    this.camera.lookAt(9.5, 0, 9.5);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
@@ -44,8 +44,10 @@ export class DroneScene {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.05;
-    this.controls.maxPolarAngle = Math.PI / 2.2;
-    this.controls.target.set(10, 0, 10);
+    this.controls.maxPolarAngle = Math.PI / 2.15;
+    this.controls.minDistance = 12;
+    this.controls.maxDistance = 45;
+    this.controls.target.set(9.5, 0, 9.5);
 
     this._setupLights();
     this.drone = null;
@@ -70,6 +72,9 @@ export class DroneScene {
     this._posInitialized = false;
     this._plannedKey = "";
     this._trailCount = 0;
+    this._builtSceneVersion = 0;
+    this._buildScheduled = false;
+    this._pendingLayout = null;
 
     window.addEventListener("resize", () => this._onResize());
   }
@@ -118,24 +123,28 @@ export class DroneScene {
   }
 
   _setupLights() {
-    const ambient = new THREE.AmbientLight(0x404060, 0.6);
+    const ambient = new THREE.AmbientLight(0xfff5e6, 0.55);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-    sun.position.set(15, 25, 10);
+    const sun = new THREE.DirectionalLight(0xffeedd, 1.1);
+    sun.position.set(18, 28, 12);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 50;
-    sun.shadow.camera.left = -25;
-    sun.shadow.camera.right = 25;
-    sun.shadow.camera.top = 25;
-    sun.shadow.camera.bottom = -25;
+    sun.shadow.camera.far = 55;
+    sun.shadow.camera.left = -22;
+    sun.shadow.camera.right = 22;
+    sun.shadow.camera.top = 22;
+    sun.shadow.camera.bottom = -22;
+    sun.shadow.bias = -0.0005;
     this.scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0x6080c0, 0.3);
-    fill.position.set(-10, 10, -5);
+    const fill = new THREE.DirectionalLight(0xc8d8f0, 0.25);
+    fill.position.set(-12, 14, -8);
     this.scene.add(fill);
+
+    const warm = new THREE.HemisphereLight(0xfff8f0, 0x8b7355, 0.35);
+    this.scene.add(warm);
   }
 
   _onResize() {
@@ -159,94 +168,8 @@ export class DroneScene {
       });
     }
 
-    const floorGeo = new THREE.PlaneGeometry(mapLayout[0].length, mapLayout.length);
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x8899aa,
-      roughness: 0.85,
-      metalness: 0.05,
-    });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(mapLayout[0].length / 2 - 0.5, 0, mapLayout.length / 2 - 0.5);
-    floor.receiveShadow = true;
-    this.floorMesh = floor;
-    this.mapGroup.add(floor);
-
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: 0x9ca3af,
-      roughness: 0.7,
-      metalness: 0.1,
-    });
-    const crateMat = new THREE.MeshStandardMaterial({
-      color: 0x92400e,
-      roughness: 0.8,
-      metalness: 0.05,
-    });
-    const doorMat = new THREE.MeshStandardMaterial({ color: 0x2563eb });
-    const plantMat = new THREE.MeshStandardMaterial({ color: 0x166534 });
-
-    for (let row = 0; row < mapLayout.length; row++) {
-      for (let col = 0; col < mapLayout[row].length; col++) {
-        const cell = mapLayout[row][col];
-        if (cell === 0) continue;
-
-        const x = col;
-        const z = row;
-
-        if (cell === 1) {
-          const wall = new THREE.Mesh(
-            new THREE.BoxGeometry(1, WALL_HEIGHT, 1),
-            wallMat
-          );
-          wall.position.set(x, WALL_HEIGHT / 2, z);
-          wall.castShadow = true;
-          wall.receiveShadow = true;
-          this.mapGroup.add(wall);
-
-          if (Math.random() < 0.08) {
-            const door = new THREE.Mesh(
-              new THREE.BoxGeometry(0.6, 1.8, 0.1),
-              doorMat
-            );
-            door.position.set(x, 0.9, z + 0.45);
-            this.mapGroup.add(door);
-          }
-        } else if (cell === 2) {
-          const crate = new THREE.Mesh(
-            new THREE.BoxGeometry(0.85, CRATE_HEIGHT, 0.85),
-            crateMat
-          );
-          crate.position.set(x, CRATE_HEIGHT / 2, z);
-          crate.castShadow = true;
-          crate.receiveShadow = true;
-          this.mapGroup.add(crate);
-        }
-      }
-    }
-
-    // Decorative plants in free spaces
-    const plantPositions = [
-      [3, 3], [7, 2], [12, 4], [16, 3], [4, 12], [8, 14],
-      [14, 8], [17, 12], [3, 17], [11, 17],
-    ];
-    for (const [px, pz] of plantPositions) {
-      if (mapLayout[pz] && mapLayout[pz][px] === 0) {
-        const pot = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.15, 0.18, 0.25, 8),
-          new THREE.MeshStandardMaterial({ color: 0x78350f })
-        );
-        pot.position.set(px, 0.125, pz);
-        this.mapGroup.add(pot);
-
-        const plant = new THREE.Mesh(
-          new THREE.SphereGeometry(0.3, 8, 8),
-          plantMat
-        );
-        plant.position.set(px, 0.45, pz);
-        plant.scale.y = 1.3;
-        this.mapGroup.add(plant);
-      }
-    }
+    const { floorMesh } = buildApartmentInterior(this.mapGroup, mapLayout, this.scene);
+    this.floorMesh = floorMesh;
   }
 
   _createDrone() {
@@ -254,19 +177,19 @@ export class DroneScene {
 
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(0.5, 0.12, 0.5),
-      new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.3, roughness: 0.5 })
+      new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.4, roughness: 0.45 })
     );
-    body.position.y = 1.2;
+    body.position.y = 1.35;
     body.castShadow = true;
     group.add(body);
 
-    const armMat = new THREE.MeshStandardMaterial({ color: 0x334155 });
+    const armMat = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.3 });
     const positions = [
       [0.3, 0.3], [-0.3, 0.3], [0.3, -0.3], [-0.3, -0.3],
     ];
     for (const [ax, az] of positions) {
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.04), armMat);
-      arm.position.set(ax * 0.5, 1.2, az * 0.5);
+      arm.position.set(ax * 0.5, 1.35, az * 0.5);
       arm.rotation.y = Math.atan2(az, ax);
       group.add(arm);
 
@@ -274,7 +197,7 @@ export class DroneScene {
         new THREE.CylinderGeometry(0.12, 0.12, 0.02, 16),
         new THREE.MeshStandardMaterial({ color: 0x64748b, transparent: true, opacity: 0.7 })
       );
-      prop.position.set(ax * 0.55, 1.28, az * 0.55);
+      prop.position.set(ax * 0.55, 1.43, az * 0.55);
       group.add(prop);
     }
 
@@ -282,7 +205,7 @@ export class DroneScene {
       new THREE.SphereGeometry(0.04, 8, 8),
       new THREE.MeshBasicMaterial({ color: 0x22c55e })
     );
-    led.position.set(0, 1.25, 0.2);
+    led.position.set(0, 1.4, 0.2);
     group.add(led);
 
     return group;
@@ -415,11 +338,33 @@ export class DroneScene {
     return group;
   }
 
+  _scheduleBuildMap(mapLayout) {
+    if (this._buildScheduled) {
+      this._pendingLayout = mapLayout;
+      return;
+    }
+    this._buildScheduled = true;
+    this._pendingLayout = null;
+    requestAnimationFrame(() => {
+      this.buildMap(mapLayout);
+      this._buildScheduled = false;
+      if (this._pendingLayout) {
+        const layout = this._pendingLayout;
+        this._pendingLayout = null;
+        this._scheduleBuildMap(layout);
+      }
+    });
+  }
+
   updateState(state) {
     if (!state) return;
 
-    if (state.map_layout && this.mapGroup.children.length === 0) {
-      this.buildMap(state.map_layout);
+    if (
+      state.map_layout &&
+      (this.mapGroup.children.length === 0 || this._builtSceneVersion !== SCENE_VERSION)
+    ) {
+      this._builtSceneVersion = SCENE_VERSION;
+      this._scheduleBuildMap(state.map_layout);
     }
 
     if (!this.drone) {

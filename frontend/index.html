@@ -4,14 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RL Based Indoor Drone Navigation</title>
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/css/style.css?v=6" />
 </head>
 <body>
   <div id="app">
     <header class="header">
       <div class="title-block">
         <h1><span class="accent">RL BASED</span> INDOOR DRONE NAVIGATION</h1>
-        <p class="subtitle">Autonomous Navigation Inside Buildings using Reinforcement Learning</p>
+        <p class="subtitle">Autonomous drone navigation through a furnished apartment interior</p>
       </div>
       <div class="controls">
         <button id="btn-start" class="btn primary">Start Demo</button>
@@ -22,7 +22,7 @@
     <main class="main">
       <div class="simulation-panel">
         <div class="canvas-wrap" id="canvas-wrap">
-          <div class="panel-badge">3D ANIMATION (SIMULATION)</div>
+          <div class="panel-badge">FURNISHED APARTMENT — 3D VIEW</div>
           <canvas id="canvas3d"></canvas>
           <div id="pick-overlay" class="pick-overlay hidden" aria-hidden="true">
             <span id="pick-overlay-text">Click the floor to place point</span>
@@ -52,16 +52,16 @@
         <section class="card">
           <h2>Select Route</h2>
           <p class="info-text">
-            Click a button below, then click on the <strong>open floor</strong> in the 3D map.
-            The drone will plan a collision-free path around walls and crates.
+            Click a button below, then click on the <strong>wood floor</strong> in the apartment.
+            The drone will plan a collision-free path around walls and furniture.
           </p>
           <div class="point-controls">
             <button id="btn-pick-start" class="btn pick start-pick">Set Start (Blue)</button>
             <button id="btn-pick-goal" class="btn pick goal-pick">Set Goal (Green)</button>
           </div>
           <div class="point-readout">
-            <div><span class="label">Start</span> <span id="readout-start">2, 2</span></div>
-            <div><span class="label">Goal</span> <span id="readout-goal">17, 17</span></div>
+            <div><span class="label">Start</span> <span id="readout-start">4, 4</span></div>
+            <div><span class="label">Goal</span> <span id="readout-goal">17, 10</span></div>
           </div>
           <p id="pick-hint" class="pick-hint">Select start and goal, then press Start Demo.</p>
         </section>
@@ -71,7 +71,9 @@
             <li><span class="dot start"></span> Start Position</li>
             <li><span class="dot goal"></span> Goal Position</li>
             <li><span class="dot path"></span> Flight Path</li>
-            <li><span class="dot drone"></span> RL Agent (Drone)</li>
+            <li><span class="dot drone"></span> Drone Agent</li>
+            <li><span class="dot" style="background:#b8956a;border-radius:2px;width:14px;height:14px;"></span> Wood Floor</li>
+            <li><span class="dot" style="background:#f5f0e8;border-radius:2px;width:14px;height:14px;border:1px solid #ccc;"></span> Walls &amp; Rooms</li>
           </ul>
         </section>
       </aside>
@@ -86,6 +88,6 @@
       }
     }
   </script>
-  <script type="module" src="/static/js/main.js"></script>
+  <script type="module" src="/static/js/main.js?v=6"></script>
 </body>
 </html>
